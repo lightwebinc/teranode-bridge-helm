@@ -1,0 +1,78 @@
+name: lint
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+
+      - name: helm lint (defaults)
+        run: helm lint .
+
+      - name: helm lint (strict)
+        run: helm lint . --strict
+
+      - name: helm template (defaults)
+        run: |
+          helm template release-test . --debug > /tmp/render-default.yaml
+          test -s /tmp/render-default.yaml
+
+      - name: helm template (sink mode — no cluster targets, no retrieval Service)
+        run: |
+          helm template release-test . \
+            --set config.mode=sink \
+            --debug > /tmp/render-sink.yaml
+          test -s /tmp/render-sink.yaml
+          ! grep -q 'retrieval' /tmp/render-sink.yaml
+          ! grep -q -- '-advertise' /tmp/render-sink.yaml
+          ! grep -q -- '-propagation' /tmp/render-sink.yaml
+
+      - name: helm template (servicemonitor + pdb + networkpolicy enabled)
+        run: |
+          helm template release-test . \
+            --set metrics.serviceMonitor.enabled=true \
+            --set podDisruptionBudget.enabled=true \
+            --set networkPolicy.enabled=true \
+            --debug > /tmp/render-full.yaml
+          test -s /tmp/render-full.yaml
+
+      - name: reject a doubled -advertise path
+        run: |
+          if helm template release-test . \
+              --set config.advertise=http://192.0.2.10:9145/api/v1 >/dev/null 2>&1; then
+            echo "expected the chart to reject advertise carrying apiPrefix"; exit 1
+          fi
+
+      - name: reject multiple reverse-path submitters
+        run: |
+          if helm template release-test . \
+              --set replicaCount=3 \
+              --set config.blockchain=192.0.2.10:20087 \
+              --set config.localAsset=http://192.0.2.10:20090/api/v1 \
+              --set config.edgeIngress=2001:db8:1::1 >/dev/null 2>&1; then
+            echo "expected the chart to reject replicaCount>1 with submitter=true"; exit 1
+          fi
+
+      - name: helm template (examples — catch drift)
+        run: |
+          for f in examples/*.yaml; do
+            echo "::group::$f"
+            helm template release-test . -f "$f" --debug > "/tmp/render-$(basename "$f")"
+            test -s "/tmp/render-$(basename "$f")"
+            echo "::endgroup::"
+          done

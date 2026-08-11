@@ -1,0 +1,11 @@
+teranode-bridge-helm
+Copyright 2026 Lightweb Inc. (https://lightweb.net)
+
+=========================================================================
+
+This repository contains the Helm chart for deploying teranode-bridge on
+Kubernetes. The chart packages templates, default values, JSON Schema
+validation, and CI workflows; the application source lives in the
+teranode-bridge repository.
+
+=========================================================================

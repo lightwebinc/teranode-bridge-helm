@@ -1,0 +1,51 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $c := .Values.config -}}
+{{- /* Three ports, three audiences, three rules: the delivery side reaches the
+       lanes, the Teranode cluster reaches the retrieval plane, Prometheus
+       reaches metrics. Fail-closed — an empty `from` for a rule admits no peer
+       on that port. Under networking.mode=host this policy matches nothing that
+       matters: host traffic never enters the pod network, so the node firewall
+       is the real control. */ -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "teranode-bridge.fullname" . }}
+  labels:
+    {{- include "teranode-bridge.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "teranode-bridge.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: tx
+          protocol: TCP
+        - port: subtree
+          protocol: TCP
+        - port: block
+          protocol: TCP
+      {{- with .Values.networkPolicy.laneIngressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- if ne ($c.mode | default "all") "sink" }}
+    - ports:
+        - port: retrieval
+          protocol: TCP
+      {{- with .Values.networkPolicy.retrievalIngressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
+    {{- if .Values.metrics.enabled }}
+    - ports:
+        - port: metrics
+          protocol: TCP
+      {{- with .Values.networkPolicy.metricsIngressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
+{{- end }}

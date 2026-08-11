@@ -1,0 +1,369 @@
+# Default values for teranode-bridge.
+#
+# The binary is FLAG-ONLY — no env fallback, no config file — so the Deployment
+# renders `args:` from `config` below. Empty string / 0 / "0s" / false are
+# OMITTED from the arg vector so the binary's own default applies. Anything not
+# modelled here goes verbatim into extraArgs.
+#
+# FOUR EXCEPTIONS render unconditionally, because for them the zero value MEANS
+# something the omitted form can never express (omission = "use the binary
+# default", which for all four is the non-zero one):
+#   config.submitter   false = do not hold the submitter role
+#   config.txRetries   0     = no retries at all
+#   config.statsEvery  "0s"  = no periodic stats block
+#   metrics.enabled    false = no metrics/health listener at all
+# Each is called out again at its key.
+
+replicaCount: 1
+# One replica is the intended shape, and scaling out is not free — read
+# README "Scaling" first. Two facts drive it:
+#   1. The object cache is IN-PROCESS. A pushed subtree lives only on the bridge
+#      that received it, and that bridge stamps ITSELF into the announcement. Put
+#      N replicas behind one Service and (N-1)/N of the cluster's pulls land on a
+#      replica that never saw the object: 404, and the cluster falls back to its
+#      ordinary peer fetch (slower, not lost).
+#   2. Exactly one bridge per cluster may hold the reverse-path submitter role.
+#      The chart REFUSES to install replicaCount > 1 with the reverse path
+#      enabled and config.submitter true, rather than quietly double-publishing
+#      every locally produced block onto the object plane.
+# Scale by adding releases, each with its own config.advertise — not replicas.
+
+image:
+  repository: ghcr.io/lightwebinc/teranode-bridge
+  pullPolicy: IfNotPresent
+  tag: "" # defaults to .Chart.appVersion
+
+# PUBLIC image — normally empty. Present for mirrored/private registries.
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+# Matches the distroless/static:nonroot image (uid 65532), and keeps holding
+# even if the image is overridden.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# The bridge writes nothing to disk and needs no capability: it opens ordinary
+# TCP sockets, all above 1024. Move a lane below 1024 and you must add
+# NET_BIND_SERVICE here — the image runs as nonroot and the bind will fail
+# otherwise, at startup, with the lane never reaching "bound" (so /readyz stays
+# 503 rather than the pod looking healthy and deaf).
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# pod  = ordinary CNI; the lanes and the retrieval plane are reached through the
+#        Services below. Right when the Teranode cluster and the delivery side
+#        can both route to cluster Services.
+# host = hostNetwork; the pod binds the node's own addresses. Right when the
+#        cluster (or the delivery tunnel) can only reach a node address — the
+#        common case, since the bridge is a landing tier in front of a cluster
+#        that lives on a LAN, not in this k8s cluster. In host mode the ports in
+#        `config` are HOST ports: only one bridge per node, and the rollout must
+#        stop the old pod before starting the new one (see updateStrategy).
+networking:
+  mode: pod # pod | host
+  host:
+    dnsPolicy: ClusterFirstWithHostNet
+
+# Empty => RollingUpdate for networking.mode=pod, Recreate for host (a rolling
+# update cannot bind the same host ports twice, so the new pod would sit in
+# CrashLoopBackOff until the old one goes away). Set explicitly to override.
+updateStrategy: {}
+
+config:
+  # ── Delivery lanes (inbound, one TCP listener per object class) ────────────
+  # The streams are bare — no length prefix, no type tag — so each lane carries
+  # exactly one class and objects are delimited by their own structure. Crossing
+  # two classes onto one lane shows up as `lane stats dropped`, not as silence.
+  # [::] accepts on whatever address the delivery side reaches this pod on; pin
+  # to a specific address once the deployment has settled.
+  txListen: "[::]:8833" # -tx-listen      transactions, BRC-30 extended format
+  subtreeListen: "[::]:9143" # -subtree-listen BRC-143 push frames
+  blockListen: "[::]:9144" # -block-listen   BRC-144 push frames
+  # -max-object: per-object ceiling in bytes, every lane. 0 = the objfmt codec
+  # default (64 MiB). Only raise it if a legitimate object exceeds that.
+  maxObject: 0
+
+  # ── Retrieval plane (the CLUSTER dials this) ───────────────────────────────
+  # Teranode learns of a subtree/block by announcement plus pull: the bridge
+  # announces {hash, URL} and the cluster fetches the bytes from that URL. This
+  # is the server that answers.
+  retrievalListen: "[::]:9145" # -retrieval-listen (bind address)
+
+  # -advertise: the base URL the CLUSTER should dial. REQUIRED unless mode=sink.
+  # This is the single value that silently breaks all subtree and block ingest
+  # when it is wrong: announcements keep succeeding, pulls never arrive, and the
+  # only symptom is `retrieval stats` flat against a rising `announce stats`.
+  #
+  #   * It is what the CLUSTER can dial — not necessarily what the bridge binds.
+  #     Binding [::]:9145 and advertising a routable address is the normal shape.
+  #   * BASE URL ONLY — do NOT append apiPrefix. The announced URL is
+  #     advertise + apiPrefix; putting /api/v1 in both doubles the path and the
+  #     cluster's subtree/block pulls 404. The chart REFUSES to install that.
+  #   * No trailing slash (harmless — it is trimmed — but write it clean).
+  #   * Scheme required: http:// or https://.
+  #
+  # e.g. "http://[2001:db8:3f::1]:9145" (host mode, node address)
+  #      "http://teranode-bridge-retrieval.bsv-mcast.svc.cluster.local:9145"
+  #        (pod mode — ONLY if the cluster resolves this k8s cluster's DNS)
+  # helm install prints the exact URL that will be announced; check it.
+  advertise: ""
+
+  # -api-prefix: path prefix the retrieval plane serves on. Must match what the
+  # cluster expects — it concatenates the announced base URL with
+  # "/subtree/{hash}" verbatim, and its own asset service mounts under /api/v1.
+  # There is no reason to change this against a stock Teranode.
+  apiPrefix: "/api/v1"
+
+  # ── Cluster ingest targets ─────────────────────────────────────────────────
+  # Lists, not comma strings: each element renders as its own repeated flag, so
+  # `--set config.propagation[0]=...` needs no comma escaping and `kubectl
+  # describe pod` shows one endpoint per line.
+  # Both are REQUIRED unless mode=sink. At startup the bridge probes
+  # {propagation}/health and pings the brokers; NEITHER failure is fatal (the
+  # cluster may still be starting), so a typo here surfaces later as `failed`
+  # submits or `announce failures`, not as a crash.
+  propagation: [] # -propagation e.g. ["http://192.0.2.10:20833"] (round-robined per tx)
+  # The brokers must advertise a listener that resolves FROM THIS POD. A
+  # mis-advertised listener passes the ping and then fails at produce time.
+  kafka: [] # -kafka       e.g. ["192.0.2.10:19092"]
+
+  # ── Announcements ──────────────────────────────────────────────────────────
+  # Must match the cluster's own topic configuration; these defaults match
+  # Teranode's single-node defaults. An announcement produced to a topic nobody
+  # consumes is silently ineffective — the object is never pulled, never
+  # validated, and only shows as a growing announce/retrieval gap.
+  subtreeTopic: "subtrees-teranode1" # -subtree-topic
+  blockTopic: "blocks-teranode1" # -block-topic
+  # -peer-id: LEAVE EMPTY. It is a libp2p identity used for reputation
+  # bookkeeping, and empty short-circuits every such check. An identity the
+  # cluster's p2p service does not recognise is not cosmetic: on the block path
+  # an unrecognised or flagged peer causes catchup to be skipped and fetches to
+  # be REFUSED. The bridge is not a libp2p peer, so it claims no identity.
+  peerId: ""
+
+  # ── Reverse path (cluster → object plane) ──────────────────────────────────
+  # Disabled unless blockchain is set; ignored entirely in mode=sink. Setting
+  # blockchain REQUIRES localAsset and edgeIngress (the chart rejects the
+  # incomplete set at install time rather than letting the binary exit 2 into a
+  # crashloop).
+  # -blockchain: cluster blockchain gRPC host:port, e.g. "192.0.2.10:20087".
+  # The connection is PLAINTEXT AND UNAUTHENTICATED — keep it on a trusted LAN.
+  blockchain: ""
+  # -local-asset: cluster asset base URL INCLUDING its API prefix, e.g.
+  # "http://192.0.2.10:20090/api/v1". The easy thing to get backwards: unlike
+  # advertise (which the chart appends apiPrefix to), this one is dialled exactly
+  # as given, so it carries the cluster's own prefix.
+  localAsset: ""
+  # -edge-ingress: object-plane ingress host for upward submits, typically
+  # reachable only over the delivery link.
+  edgeIngress: ""
+  edgeSubtreePort: 8726 # -edge-subtree-port BRC-143 subtree submits
+  edgeBlockPort: 8727 # -edge-block-port   BRC-144 block submits
+
+  # -submitter: hold the submitter role. EXACTLY ONE bridge per class per cluster
+  # may hold it — two submitters publish the same block twice onto the object
+  # plane. RENDERED UNCONDITIONALLY as -submitter=<value>: the binary default is
+  # true, and a bare flag can only turn something ON, so the omit-when-false form
+  # would make `submitter: false` a silent no-op.
+  # false still connects and still runs the origin filter (remote_skipped keeps
+  # counting) but publishes nothing and fetches no assets — a hot spare whose
+  # promotion is a flag flip and a restart.
+  submitter: true
+
+  # -mine-tag: this cluster's coinbase_arbitrary_text (e.g. "/teranode1/").
+  # STRONGLY RECOMMENDED whenever the reverse path is on. Blockchain
+  # notifications carry no origin, so a block this cluster learned over libp2p
+  # BEFORE the fabric delivered it looks locally produced — without the tag the
+  # reverse path republishes a remote block upward with false attribution. With
+  # it, only blocks whose in-band coinbase carries the tag go up; the rest count
+  # in btb_reverse_skipped_total{reason="foreign_origin"}. The check is derived
+  # from block content, so it survives a restart (which wipes the seen-registry).
+  # Needs no Teranode change: coinbase_arbitrary_text is existing per-node
+  # configuration — give each cluster a distinct tag and repeat it here.
+  mineTag: ""
+
+  # ── Transaction pipeline ───────────────────────────────────────────────────
+  # The tx lane never submits synchronously: objects are enqueued to a batching
+  # pipeline that ships them on propagation's POST /txs. A full queue blocks the
+  # lane, which closes the TCP window — that backpressure is what bounds memory
+  # when the cluster is slower than the fabric, so do not "fix" it with a bigger
+  # batch.
+  # -tx-batch: txs per batch, clamped to the server's 1024. NOTE: 0 does NOT mean
+  # per-tx POST /tx — the flag's own help text is stale; the pipeline normalises
+  # anything <= 0 back to 512.
+  txBatch: 512
+  # -tx-batch-bytes: batch body ceiling, clamped to 30 MiB to stay under the
+  # server's 32 MiB.
+  txBatchBytes: 8388608
+  # -tx-linger: max age of a non-full batch — the added latency when quiet.
+  txLinger: "2ms"
+  # -tx-inflight: concurrent batch requests. throughput ≈ inflight × batch / RTT.
+  txInflight: 4
+  # -tx-builders: parallel builders; power of two, ≤16 (anything else is rounded
+  # DOWN, so 6 silently becomes 4 — the schema rejects it instead). Txs route to
+  # a builder by txid, so a parent and its child usually land in the same batch,
+  # which the pipe then seals: propagation refuses a request holding both.
+  txBuilders: 4
+  # -tx-retries: per-tx retries for failures that resolve with time (a missing
+  # parent from a cross-builder race). RENDERED UNCONDITIONALLY: 0 means "no
+  # retries", which omission would turn back into the binary's 3.
+  txRetries: 3
+
+  # ── Cache ──────────────────────────────────────────────────────────────────
+  # This is a cache, not a store of record. Size the TTL against VALIDATION LAG
+  # (seconds), not retention: an entry evicted before the cluster pulls it is a
+  # 404 and the cluster falls back to its ordinary peer path — degraded latency,
+  # not lost data. Watch `cache evicted` and `retrieval miss` together; rising
+  # miss against flat evicted points at a topic or -advertise problem instead.
+  # -cache-bytes: PER CACHE, and two are created (objects and transactions), so
+  # the process ceiling is TWICE this — budget resources.limits.memory for that,
+  # not for the number written here.
+  cacheBytes: 1073741824
+  cacheTtl: "10m" # -cache-ttl
+
+  # ── Process ────────────────────────────────────────────────────────────────
+  # -mode: all = full bridge. sink = receive, parse, verify and count only, with
+  # NO cluster targets: no propagation submitter, no Kafka producer, no retrieval
+  # plane, no reverse path. Lanes still run and still enforce framing, so sink is
+  # how you burn in a delivery slot before a cluster exists, or separate
+  # object-plane faults from cluster-side ones.
+  mode: "all" # all | sink
+  # -stats-every: interval between stats blocks. RENDERED UNCONDITIONALLY:
+  # "0s" disables periodic stats (a final block is still logged at shutdown),
+  # which omission would turn back into the binary's 1m.
+  statsEvery: "1m"
+  # -metrics-addr: HTTP listener for /metrics, /healthz, /readyz, /loglevel.
+  # The probes below hang off this listener — see metrics.enabled to turn the
+  # whole thing off (setting this to "" here would NOT: an empty value is
+  # omitted and the binary default [::]:9146 would apply).
+  metricsAddr: "[::]:9146"
+  logLevel: "info" # -log-level  debug|info|warn|error; also POST /loglevel + SIGHUP
+  # -log-format: text (stderr) | json (stdout). The binary defaults to text only
+  # because the integration demo greps its log lines; set json for anything that
+  # ships to log aggregation, which is most of what this chart deploys.
+  logFormat: "text"
+  # -instance-id: service.instance.id shared by logs and metrics so the two
+  # join. Empty defaults to hostname, which in a pod is the pod name — already
+  # the right answer.
+  instanceId: ""
+  debug: false # -debug: deprecated alias for -log-level=debug
+
+# Appended verbatim after every rendered flag, for what is not modelled above.
+# It can also override: a repeated ordinary flag takes the LAST value, while
+# -propagation and -kafka accumulate (they are repeatable by design). Overriding
+# this way hides the real value from `helm get values`, so prefer the key.
+extraArgs: []
+
+# The binary reads NO environment variable. This is for the Go runtime
+# (GOMEMLIMIT, GOMAXPROCS) and for values you want to reference from extraArgs
+# via kubelet's $(VAR) expansion.
+extraEnv: []
+
+# Ports are DERIVED from the config.*Listen addresses — one source of truth, so
+# a Service port can never drift from what the process actually binds.
+service:
+  # Delivery lanes (tx/subtree/block) + metrics. Its callers are on the delivery
+  # side of the fabric.
+  type: ClusterIP
+  annotations: {}
+  # The retrieval plane gets its OWN Service because its caller is the other
+  # side entirely — the Teranode cluster, dialling back in — and that side
+  # usually needs a different exposure (a fixed LoadBalancer address, or a node
+  # address its LAN routes). Whatever address this resolves to is what
+  # config.advertise must name.
+  retrieval:
+    type: ClusterIP
+    annotations: {}
+    loadBalancerIP: ""
+    # Local preserves the client source address and avoids a second hop; it
+    # requires the pulling cluster to reach a node that actually runs a pod.
+    externalTrafficPolicy: ""
+
+metrics:
+  # false renders -metrics-addr= (explicitly empty) to switch off the listener
+  # entirely — /metrics, /healthz, /readyz and POST /loglevel all go with it,
+  # and so do the probes below, which have nowhere else to point.
+  enabled: true
+  path: /metrics
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    relabelings: []
+    metricRelabelings: []
+
+# /readyz turns 200 once EVERY lane is bound — before that the bridge cannot
+# accept delivery, so gate anything that steers traffic on readiness, not on the
+# pod merely running. /healthz is always 200: it proves the process is alive,
+# nothing more, which is exactly what a liveness probe should assert.
+probes:
+  readiness:
+    enabled: true
+    initialDelaySeconds: 3
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  liveness:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Memory is dominated by the two caches (2 × config.cacheBytes at the ceiling)
+# plus in-flight batches, so a limit below that budget gets the pod OOM-killed
+# mid-validation-window. These are a starting point for the 1 GiB default with
+# headroom; raise both together with cacheBytes.
+resources:
+  requests:
+    cpu: 500m
+    memory: 2560Mi
+  limits:
+    cpu: "4"
+    memory: 3Gi
+
+# Long enough for in-flight batches and a streaming block pull to finish.
+terminationGracePeriodSeconds: 30
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+topologySpreadConstraints: []
+
+# With the default single replica a PDB of minAvailable: 1 blocks node drains
+# outright. Enable it only alongside a scaled-out, submitter: false pull tier.
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# Fail-closed: enabling the policy with an empty `from` list for a port admits
+# NO peers on it. The three ports have three different audiences, so they are
+# separate keys rather than one blanket rule — the delivery side has no business
+# reaching the retrieval plane, and the cluster none reaching the lanes.
+# Ignored under networking.mode=host (host traffic never enters the pod network;
+# restrict it with the node firewall).
+networkPolicy:
+  enabled: false
+  laneIngressFrom: [] # tx/subtree/block — the delivery side
+  retrievalIngressFrom: [] # retrieval — the Teranode cluster
+  metricsIngressFrom: [] # metrics — Prometheus

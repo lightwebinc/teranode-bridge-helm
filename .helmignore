@@ -1,0 +1,31 @@
+# Patterns to ignore when building Helm packages.
+# Standard Helm .helmignore content.
+.DS_Store
+.git/
+.gitignore
+.bzr/
+.hg/
+.hgignore
+.svn/
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+.project
+.idea/
+*.tmproj
+.vscode/
+
+# CI / tooling — not part of the chart payload
+.github/
+.helmignore
+ci/
+cr.yaml
+README.md
+OWNERS
+.cr-release-packages/
+.cr-index/
+
+# helm-docs scratch
+README.md.gotmpl

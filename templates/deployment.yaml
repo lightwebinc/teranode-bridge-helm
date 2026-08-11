@@ -1,0 +1,151 @@
+{{- include "teranode-bridge.validate" . -}}
+{{- $c := .Values.config -}}
+{{- $sink := eq ($c.mode | default "all") "sink" -}}
+{{- $metricsPort := "" -}}
+{{- if .Values.metrics.enabled -}}
+{{- $metricsPort = include "teranode-bridge.port" ($c.metricsAddr | default "[::]:9146") -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "teranode-bridge.fullname" . }}
+  labels:
+    {{- include "teranode-bridge.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "teranode-bridge.selectorLabels" . | nindent 6 }}
+  {{- if .Values.updateStrategy }}
+  strategy:
+    {{- toYaml .Values.updateStrategy | nindent 4 }}
+  {{- else if eq .Values.networking.mode "host" }}
+  {{- /* Host ports cannot be bound twice: a rolling update would leave the new
+         pod crashlooping on "address already in use" until the old one died. */}}
+  strategy:
+    type: Recreate
+  {{- end }}
+  template:
+    metadata:
+      {{- /* One warning, worst first: a missing required flag exits 2 before any
+             listener opens, so it hides everything after it anyway. */ -}}
+      {{- $warn := "" }}
+      {{- if and (not $sink) (not $c.advertise) }}
+      {{- $warn = "config.advertise is empty and config.mode is not sink: the bridge exits 2 at startup. Set it to the base URL the Teranode cluster can dial for pulls, without the API prefix (the chart appends config.apiPrefix)." }}
+      {{- else if and (not $sink) (or (not $c.propagation) (not $c.kafka)) }}
+      {{- $warn = "config.propagation and config.kafka are required unless config.mode is sink: the bridge exits 2 at startup." }}
+      {{- else if and (not $sink) $c.blockchain (not $c.mineTag) }}
+      {{- $warn = "The reverse path is enabled with an empty config.mineTag: a block this cluster learned over libp2p before the fabric delivered it is indistinguishable from a locally produced one and will be republished upward with false attribution. Set config.mineTag to this cluster's coinbase_arbitrary_text." }}
+      {{- end }}
+      {{- if or $warn .Values.podAnnotations }}
+      annotations:
+        {{- if $warn }}
+        helm.sh/chart-warnings: {{ $warn | quote }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      labels:
+        {{- include "teranode-bridge.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "teranode-bridge.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if eq .Values.networking.mode "host" }}
+      hostNetwork: true
+      dnsPolicy: {{ .Values.networking.host.dnsPolicy }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- /* The distroless image has no shell, and the binary is the
+                 entrypoint — flags are the whole configuration surface. */}}
+          args:
+            {{- include "teranode-bridge.args" . | trim | nindent 12 }}
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: tx
+              containerPort: {{ include "teranode-bridge.port" $c.txListen | int }}
+              protocol: TCP
+            - name: subtree
+              containerPort: {{ include "teranode-bridge.port" $c.subtreeListen | int }}
+              protocol: TCP
+            - name: block
+              containerPort: {{ include "teranode-bridge.port" $c.blockListen | int }}
+              protocol: TCP
+            {{- if not $sink }}
+            - name: retrieval
+              containerPort: {{ include "teranode-bridge.port" $c.retrievalListen | int }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ $metricsPort | int }}
+              protocol: TCP
+            {{- end }}
+          {{- if .Values.metrics.enabled }}
+          {{- /* Both probes live on the metrics listener; with metrics.enabled
+                 false there is no endpoint to probe. */}}
+          {{- if .Values.probes.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- end }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

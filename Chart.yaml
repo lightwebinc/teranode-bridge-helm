@@ -1,0 +1,34 @@
+apiVersion: v2
+name: teranode-bridge
+description: Landing-tier shim for pushed delivery into an unmodified Teranode cluster — terminates the tx/subtree/block delivery lanes, announces and serves the cluster's pulls, and publishes cluster-produced subtrees and blocks back onto the object plane
+type: application
+version: 0.1.0
+# appVersion MUST equal a tag published on ghcr.io/lightwebinc/teranode-bridge
+# (the chart's tag:"" default pulls this). Images are published manually via the
+# binary repo's image-publish.yml workflow; bump appVersion ONLY in lockstep with
+# an image publish — binary git tags are NOT image tags until published.
+appVersion: "0.1.0"
+kubeVersion: ">= 1.27.0-0"
+keywords:
+  - bitcoin
+  - bsv
+  - multicast
+  - teranode
+  - brc-30
+  - brc-143
+  - brc-144
+home: https://github.com/lightwebinc/teranode-bridge
+sources:
+  - https://github.com/lightwebinc/teranode-bridge
+  - https://github.com/lightwebinc/teranode-bridge-helm
+maintainers:
+  - name: lightwebinc
+    url: https://github.com/lightwebinc
+icon: https://raw.githubusercontent.com/lightwebinc/bsv-multicast/main/.assets/icon.png
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: added
+      description: initial chart — three delivery lanes, a retrieval Service the cluster dials, the reverse path, and sink mode
+    - kind: added
+      description: install-time rejection of a doubled -advertise path and of multiple reverse-path submitters

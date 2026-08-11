@@ -1,0 +1,90 @@
+{{- $c := .Values.config -}}
+{{- $sink := eq ($c.mode | default "all") "sink" -}}
+{{- $full := include "teranode-bridge.fullname" . -}}
+teranode-bridge {{ .Chart.AppVersion }} deployed as {{ $full }} in {{ .Release.Namespace }} (mode: {{ $c.mode | default "all" }}{{ if eq .Values.networking.mode "host" }}, hostNetwork{{ end }}).
+
+Delivery lanes (inbound):
+  tx      (BRC-30 EF)  {{ $c.txListen }}
+  subtree (BRC-143)    {{ $c.subtreeListen }}
+  block   (BRC-144)    {{ $c.blockListen }}
+
+{{- if $sink }}
+
+Sink mode: objects are received, parsed, verified and counted. No propagation
+submit, no Kafka announce, no retrieval plane, no reverse path — and no cluster
+targets required. Watch `lane stats dropped` (framing) and the cache counters.
+{{- else }}
+
+Retrieval plane: {{ $c.retrievalListen }} -> Service {{ $full }}-retrieval:{{ include "teranode-bridge.port" $c.retrievalListen }} ({{ .Values.service.retrieval.type }})
+{{- if $c.advertise }}
+Announced pull URL: {{ include "teranode-bridge.announceUrl" . }}
+  Check this is what the CLUSTER can dial. Every subtree and block announcement
+  carries it; if it is unreachable or wrong, announcements keep succeeding and
+  no pull ever arrives — `retrieval stats` stays flat while `announce stats`
+  climbs, and nothing errors.
+{{- else }}
+
+WARNING: config.advertise is EMPTY and mode is not sink — the bridge exits 2 at
+startup. Set it to the base URL the Teranode cluster can dial for pulls, WITHOUT
+the API prefix (the announced URL is advertise + config.apiPrefix):
+  --set config.advertise=http://<address-the-cluster-can-dial>:{{ include "teranode-bridge.port" $c.retrievalListen }}
+If the cluster resolves this k8s cluster's DNS, that address is:
+  http://{{ $full }}-retrieval.{{ .Release.Namespace }}.svc.cluster.local:{{ include "teranode-bridge.port" $c.retrievalListen }}
+{{- end }}
+{{- if or (not $c.propagation) (not $c.kafka) }}
+
+WARNING: config.propagation and/or config.kafka is EMPTY and mode is not sink —
+the bridge exits 2 at startup. Both accept a list:
+  --set config.propagation[0]=http://<cluster>:20833 --set config.kafka[0]=<cluster>:19092
+{{- end }}
+{{- end }}
+
+{{- if and (not $sink) $c.blockchain }}
+
+Reverse path ENABLED (blockchain {{ $c.blockchain }}): cluster-produced subtrees
+and blocks are published back onto the object plane via {{ $c.edgeIngress }}
+(subtree {{ $c.edgeSubtreePort }} / block {{ $c.edgeBlockPort }}).
+{{- if $c.submitter }}
+  This bridge HOLDS the submitter role. Exactly one bridge per class per cluster
+  may hold it — every other bridge in front of this cluster must run with
+  config.submitter=false.
+{{- else }}
+  This bridge does NOT hold the submitter role: it subscribes and runs the origin
+  filter (remote_skipped keeps counting) but publishes nothing. Promotion is a
+  flag flip and a restart.
+{{- end }}
+{{- if not $c.mineTag }}
+
+WARNING: config.mineTag is empty with the reverse path enabled. Blockchain
+notifications carry no origin, so a block this cluster learned over libp2p BEFORE
+the fabric delivered it looks locally produced and will be republished upward
+with false attribution. Set config.mineTag to this cluster's
+coinbase_arbitrary_text (e.g. /teranode1/).
+{{- end }}
+{{- end }}
+
+{{- if gt (int .Values.replicaCount) 1 }}
+
+WARNING: replicaCount={{ .Values.replicaCount }}. The object cache is IN-PROCESS and each bridge
+announces ITSELF as the source, so pulls that land on a replica which never
+received the object return 404 and the cluster falls back to its ordinary peer
+fetch. Scale with one release per bridge, each with its own config.advertise.
+{{- end }}
+
+{{- if .Values.metrics.enabled }}
+
+Metrics: http://{{ $full }}.{{ .Release.Namespace }}.svc:{{ include "teranode-bridge.port" ($c.metricsAddr | default "[::]:9146") }}{{ .Values.metrics.path }}  (btb_* ; also /healthz, /readyz, POST /loglevel)
+{{- if and (not $sink) $c.blockchain }}
+Alert on btb_echo_mismatch_total > 0 — the object plane returned different bytes
+than this bridge published. That is a data-integrity fault, not a delivery
+hiccup, and the series is present at zero from startup so `== 0` is valid
+immediately after a restart.
+{{- end }}
+{{- else }}
+
+NOTE: metrics.enabled=false — no /metrics, /healthz, /readyz or POST /loglevel,
+and therefore no probes. The bridge only reports through its stats log lines.
+{{- end }}
+
+Rendered args:
+{{ include "teranode-bridge.args" . | trim | indent 2 }}

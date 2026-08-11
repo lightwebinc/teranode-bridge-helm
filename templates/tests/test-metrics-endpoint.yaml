@@ -1,0 +1,28 @@
+{{- if .Values.metrics.enabled }}
+{{- $c := .Values.config -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "teranode-bridge.fullname" . }}-test-metrics"
+  labels:
+    {{- include "teranode-bridge.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: probe
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          base=http://{{ include "teranode-bridge.fullname" . }}:{{ include "teranode-bridge.port" ($c.metricsAddr | default "[::]:9146") }}
+          wget -q -O - "$base/healthz" > /dev/null
+          wget -q -O - "$base{{ .Values.metrics.path }}" > /dev/null
+          # /readyz answers 200 only once every lane is bound — the one check
+          # that distinguishes a live bridge from a running process.
+          wget -q -O - "$base/readyz" > /dev/null
+{{- end }}

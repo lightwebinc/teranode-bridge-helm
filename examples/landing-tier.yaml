@@ -1,0 +1,51 @@
+# Landing tier, both directions: the bridge on a node in front of a Teranode
+# cluster. Terminates all three delivery lanes, submits transactions to
+# propagation, announces subtrees and blocks into the cluster's Kafka pointing at
+# itself, serves the pulls — and publishes what this cluster produces back onto
+# the object plane.
+#
+#   helm install bridge . -f examples/landing-tier.yaml \
+#     --set config.advertise=http://[2001:db8:3f::1]:9145
+#
+# hostNetwork because the Teranode cluster is on a LAN, not in this k8s cluster:
+# it must be able to dial the node address named by config.advertise, and the
+# delivery link lands on that node too. That also makes the lane ports HOST
+# ports — one bridge per node, and the rollout is Recreate (see values.yaml).
+#
+# Addresses use the documentation ranges (RFC 5737 192.0.2.0/24, RFC 3849
+# 2001:db8::/32). Substitute your own.
+networking:
+  mode: host
+  host:
+    dnsPolicy: ClusterFirstWithHostNet
+
+config:
+  # Pinned to the delivery-facing address now that the deployment has settled.
+  txListen: "[2001:db8:3f::1]:8833"
+  subtreeListen: "[2001:db8:3f::1]:9143"
+  blockListen: "[2001:db8:3f::1]:9144"
+
+  # Bound on the cluster-facing address; advertise the same one, WITHOUT the API
+  # prefix — the announced URL is advertise + apiPrefix.
+  retrievalListen: "[2001:db8:3f::1]:9145"
+  advertise: "" # REQUIRED: e.g. "http://[2001:db8:3f::1]:9145"
+
+  propagation:
+    - "http://192.0.2.10:20833"
+  kafka:
+    - "192.0.2.10:19092"
+
+  # Reverse path. localAsset DOES carry the cluster's own /api/v1 prefix.
+  blockchain: "192.0.2.10:20087"
+  localAsset: "http://192.0.2.10:20090/api/v1"
+  edgeIngress: "2001:db8:1::1"
+  submitter: true
+  # This cluster's coinbase_arbitrary_text: without it, a block learned over
+  # libp2p before the fabric delivered it is republished upward as if it were
+  # locally produced.
+  mineTag: "/teranode1/"
+
+  logFormat: "json"
+
+nodeSelector:
+  topology.kubernetes.io/region: us

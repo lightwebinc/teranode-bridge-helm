@@ -1,0 +1,37 @@
+{{- $c := .Values.config -}}
+{{- /* Delivery lanes + metrics. The retrieval plane is deliberately NOT here:
+       its caller is the Teranode cluster, not the delivery side, and it usually
+       needs its own exposure (see service-retrieval.yaml). */ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "teranode-bridge.fullname" . }}
+  labels:
+    {{- include "teranode-bridge.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "teranode-bridge.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: tx
+      port: {{ include "teranode-bridge.port" $c.txListen | int }}
+      targetPort: tx
+      protocol: TCP
+    - name: subtree
+      port: {{ include "teranode-bridge.port" $c.subtreeListen | int }}
+      targetPort: subtree
+      protocol: TCP
+    - name: block
+      port: {{ include "teranode-bridge.port" $c.blockListen | int }}
+      targetPort: block
+      protocol: TCP
+    {{- if .Values.metrics.enabled }}
+    - name: metrics
+      port: {{ include "teranode-bridge.port" ($c.metricsAddr | default "[::]:9146") | int }}
+      targetPort: metrics
+      protocol: TCP
+    {{- end }}

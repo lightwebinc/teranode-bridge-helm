@@ -1,0 +1,27 @@
+# Sink: receive, parse, verify and count, with NO cluster targets at all.
+#
+#   helm install burn-in . -f examples/sink.yaml
+#
+# A valid, useful deployment — not a degraded one. Use it to burn in a delivery
+# slot before a cluster exists, or to separate object-plane faults from
+# cluster-side ones: the lanes still run and still enforce framing, so
+# `lane stats dropped` still catches a sender writing malformed objects or two
+# classes crossed onto one lane.
+#
+# No propagation, no Kafka, no advertise, no reverse path — and the chart renders
+# no retrieval Service, because there are no pulls to serve.
+config:
+  mode: sink
+  statsEvery: "10s"
+  logLevel: debug
+  logFormat: json
+
+# No cluster to cache for: the caches only need to hold what the lanes push
+# through them, which sink never serves.
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi

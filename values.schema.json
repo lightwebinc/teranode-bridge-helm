@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "teranode-bridge values",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "resources": {
+      "type": "object"
+    },
+    "podSecurityContext": {
+      "type": "object"
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        },
+        "tag": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "pullPolicy"
+      ]
+    },
+    "networking": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "pod",
+            "host"
+          ]
+        }
+      },
+      "required": [
+        "mode"
+      ]
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer"
+          ]
+        },
+        "retrieval": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "ClusterIP",
+                "NodePort",
+                "LoadBalancer"
+              ]
+            },
+            "externalTrafficPolicy": {
+              "type": "string",
+              "enum": [
+                "",
+                "Cluster",
+                "Local"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "extraArgs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "txListen": {
+          "type": "string",
+          "pattern": ":[0-9]{1,5}$"
+        },
+        "subtreeListen": {
+          "type": "string",
+          "pattern": ":[0-9]{1,5}$"
+        },
+        "blockListen": {
+          "type": "string",
+          "pattern": ":[0-9]{1,5}$"
+        },
+        "retrievalListen": {
+          "type": "string",
+          "pattern": ":[0-9]{1,5}$"
+        },
+        "metricsAddr": {
+          "type": "string",
+          "pattern": ":[0-9]{1,5}$",
+          "description": "Set metrics.enabled=false to switch the listener off; an empty value here would silently fall back to the binary default [::]:9146."
+        },
+        "maxObject": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "advertise": {
+          "type": "string",
+          "pattern": "^$|^https?://[^ ]+$",
+          "description": "Base URL the Teranode cluster dials for pulls — scheme required, API prefix NOT included (the announced URL is advertise + apiPrefix; the chart refuses a doubled path)."
+        },
+        "apiPrefix": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "propagation": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^https?://[^ ]+$"
+          }
+        },
+        "kafka": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "subtreeTopic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "blockTopic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "peerId": {
+          "type": "string",
+          "description": "Leave empty. An identity the cluster's p2p service does not recognise causes block-path fetches to be refused."
+        },
+        "blockchain": {
+          "type": "string"
+        },
+        "localAsset": {
+          "type": "string",
+          "pattern": "^$|^https?://[^ ]+$",
+          "description": "Cluster asset base URL INCLUDING its API prefix — unlike advertise, this one is dialled exactly as given."
+        },
+        "edgeIngress": {
+          "type": "string"
+        },
+        "edgeSubtreePort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "edgeBlockPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "submitter": {
+          "type": "boolean",
+          "description": "Hold the reverse-path submitter role. Exactly one bridge per class per cluster may hold it; rendered unconditionally as -submitter=<value> because the binary default is true."
+        },
+        "mineTag": {
+          "type": "string"
+        },
+        "txBatch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024
+        },
+        "txBatchBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31457280
+        },
+        "txLinger": {
+          "type": "string"
+        },
+        "txInflight": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "txBuilders": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2,
+            4,
+            8,
+            16
+          ],
+          "description": "Power of two, max 16 — the binary rounds anything else DOWN to one, so a value of 6 silently becomes 4."
+        },
+        "txRetries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "PER CACHE, and there are two (objects and transactions): the process ceiling is twice this."
+        },
+        "cacheTtl": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "all",
+            "sink"
+          ]
+        },
+        "statsEvery": {
+          "type": "string"
+        },
+        "logLevel": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "logFormat": {
+          "type": "string",
+          "enum": [
+            "text",
+            "json"
+          ]
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "debug": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

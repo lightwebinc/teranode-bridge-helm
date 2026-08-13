@@ -152,11 +152,18 @@ config:
   # validated, and only shows as a growing announce/retrieval gap.
   subtreeTopic: "subtrees-teranode1" # -subtree-topic
   blockTopic: "blocks-teranode1" # -block-topic
-  # -peer-id: LEAVE EMPTY. It is a libp2p identity used for reputation
-  # bookkeeping, and empty short-circuits every such check. An identity the
-  # cluster's p2p service does not recognise is not cosmetic: on the block path
-  # an unrecognised or flagged peer causes catchup to be skipped and fetches to
-  # be REFUSED. The bridge is not a libp2p peer, so it claims no identity.
+  # -peer-id: REQUIRED when announcements are configured (the chart refuses an
+  # empty value at install time). Set a SYNTHETIC valid-format libp2p id
+  # (12D3KooW…) derived from a fresh ed25519 key and registered with no p2p
+  # service. This inverts this chart's earlier guidance, which was wrong at
+  # teranode 1cca625 and caused a verified wedge: with an empty id, catchup
+  # substitutes the announce URL, asks THIS bridge for the header chain, 404s,
+  # and circuit-breaks the cluster out of recovery. An unregistered id makes
+  # the catchup gate divert chain sync to real libp2p peers while every
+  # delivery gate (bans only) keeps pulling objects from the bridge. One id per
+  # bridge instance; never reuse a real peer's. Watch
+  # btb_retrieval_unserved_route_total{class="chain_sync"} — sustained growth
+  # means the divert has regressed on a cluster upgrade.
   peerId: ""
 
   # ── Reverse path (cluster → object plane) ──────────────────────────────────

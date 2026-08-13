@@ -82,6 +82,12 @@ into a crashloop). Warnings, not failures, live in NOTES.txt.
 {{- if and $adv (hasSuffix $prefix $adv) -}}
 {{- fail (printf "teranode-bridge: config.advertise (%q) already ends with config.apiPrefix (%q). The announced URL is advertise + apiPrefix, so this announces %q — the cluster's subtree and block pulls would 404 against a doubled path while every announcement kept succeeding. Drop the prefix from config.advertise." $adv $prefix (printf "%s%s" $adv $prefix)) -}}
 {{- end -}}
+{{- if and (not $sink) (or $c.kafka $c.subtreeTopic) (not $c.peerId) -}}
+{{- fail "teranode-bridge: config.peerId is empty while announcements are configured. Empty is UNSAFE: the cluster's catchup substitutes the announce URL for a missing peer id, targets this bridge's retrieval plane for the header chain, 404s, and circuit-breaks itself out of recovery (verified live at teranode 1cca625 — a node wedged 300+ blocks behind a healthy peer). Set config.peerId to a SYNTHETIC valid-format libp2p id (12D3KooW…) derived from a fresh ed25519 key and registered nowhere: the catchup gate then diverts chain sync to real libp2p peers while every delivery gate (bans only) keeps pulling objects from the bridge. Give each bridge instance its own id and never reuse a real peer's." -}}
+{{- end -}}
+{{- if and $c.peerId (not (regexMatch "^12D3KooW[1-9A-HJ-NP-Za-km-z]{44}$" $c.peerId)) -}}
+{{- fail (printf "teranode-bridge: config.peerId (%q) is not a valid-format ed25519 libp2p peer id (12D3KooW + 44 base58 chars). An undecodable id is diverted for the wrong reason and pollutes the cluster's logs with decode errors; derive a real one: ed25519 pub -> protobuf 08011220||pub -> multihash 0024||… -> base58btc." $c.peerId) -}}
+{{- end -}}
 {{- if and (not $sink) $c.blockchain -}}
 {{- if or (not $c.localAsset) (not $c.edgeIngress) -}}
 {{- fail "teranode-bridge: config.blockchain enables the reverse path, which also requires config.localAsset and config.edgeIngress. The binary exits 2 on the incomplete set, so this would be a crashloop rather than a running bridge." -}}

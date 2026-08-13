@@ -140,7 +140,7 @@
         "advertise": {
           "type": "string",
           "pattern": "^$|^https?://[^ ]+$",
-          "description": "Base URL the Teranode cluster dials for pulls — scheme required, API prefix NOT included (the announced URL is advertise + apiPrefix; the chart refuses a doubled path)."
+          "description": "Base URL the Teranode cluster dials for pulls \u2014 scheme required, API prefix NOT included (the announced URL is advertise + apiPrefix; the chart refuses a doubled path)."
         },
         "apiPrefix": {
           "type": "string",
@@ -170,7 +170,8 @@
         },
         "peerId": {
           "type": "string",
-          "description": "Leave empty. An identity the cluster's p2p service does not recognise causes block-path fetches to be refused."
+          "pattern": "^$|^12D3KooW[1-9A-HJ-NP-Za-km-z]{44}$",
+          "description": "SYNTHETIC valid-format libp2p peer id (12D3KooW\u2026) derived from a fresh ed25519 key, registered with no p2p service. Required when announcements are configured \u2014 empty is refused at install time: the cluster's catchup substitutes the announce URL for a missing id, targets the bridge for the header chain, 404s, and circuit-breaks itself out of recovery. The unregistered id diverts catchup to real libp2p peers while delivery gates (bans only) keep pulling from the bridge. One id per bridge instance; never a real peer's."
         },
         "blockchain": {
           "type": "string"
@@ -178,7 +179,7 @@
         "localAsset": {
           "type": "string",
           "pattern": "^$|^https?://[^ ]+$",
-          "description": "Cluster asset base URL INCLUDING its API prefix — unlike advertise, this one is dialled exactly as given."
+          "description": "Cluster asset base URL INCLUDING its API prefix \u2014 unlike advertise, this one is dialled exactly as given."
         },
         "edgeIngress": {
           "type": "string"
@@ -227,7 +228,7 @@
             8,
             16
           ],
-          "description": "Power of two, max 16 — the binary rounds anything else DOWN to one, so a value of 6 silently becomes 4."
+          "description": "Power of two, max 16 \u2014 the binary rounds anything else DOWN to one, so a value of 6 silently becomes 4."
         },
         "txRetries": {
           "type": "integer",

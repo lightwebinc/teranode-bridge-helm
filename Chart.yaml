@@ -32,5 +32,7 @@ annotations:
       description: appVersion 0.4.0 — chain-sync canary metric btb_retrieval_unserved_route_total, retry of a failed submit as one batch bounded by the inflight semaphore
     - kind: added
       description: config.peerId is required whenever announcements are configured and must be a valid-format synthetic libp2p id — empty is refused at install time
+    - kind: fixed
+      description: the peerId requirement keys on config.kafka alone; the non-empty subtreeTopic default had made it fire on a configuration that announces nothing
     - kind: added
       description: install-time rejection of a doubled -advertise path and of multiple reverse-path submitters

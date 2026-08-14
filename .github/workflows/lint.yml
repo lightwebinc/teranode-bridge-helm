@@ -68,11 +68,31 @@ jobs:
             echo "expected the chart to reject replicaCount>1 with submitter=true"; exit 1
           fi
 
+      - name: reject an empty peer id where announcements are configured
+        run: |
+          if helm template release-test . \
+              --set config.kafka[0]=192.0.2.10:19092 >/dev/null 2>&1; then
+            echo "expected the chart to reject an empty config.peerId with kafka set"; exit 1
+          fi
+
+      - name: reject a malformed peer id
+        run: |
+          if helm template release-test . \
+              --set config.kafka[0]=192.0.2.10:19092 \
+              --set config.peerId=not-a-peer-id >/dev/null 2>&1; then
+            echo "expected the chart to reject a malformed config.peerId"; exit 1
+          fi
+
+      # The examples leave peerId empty on purpose — it is per-instance and must
+      # never be copied between bridges — so drift rendering supplies one.
       - name: helm template (examples — catch drift)
+        env:
+          PEER_ID: 12D3KooWLRPJAEfHqoBUmnBrDmDcnLnkV8mWMHhqPZbrVqQZBEBu
         run: |
           for f in examples/*.yaml; do
             echo "::group::$f"
-            helm template release-test . -f "$f" --debug > "/tmp/render-$(basename "$f")"
+            helm template release-test . -f "$f" \
+              --set config.peerId="$PEER_ID" --debug > "/tmp/render-$(basename "$f")"
             test -s "/tmp/render-$(basename "$f")"
             echo "::endgroup::"
           done

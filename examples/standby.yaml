@@ -1,7 +1,8 @@
 # Standby bridge in front of a cluster that already has a submitter.
 #
 #   helm install bridge-b . -f examples/standby.yaml \
-#     --set config.advertise=http://[2001:db8:3f::2]:9145
+#     --set config.advertise=http://[2001:db8:3f::2]:9145 \
+#     --set config.peerId=12D3KooW…
 #
 # Identical to the landing tier except it never publishes upward: the subscriber
 # still connects and still runs its origin filter (so remote_skipped keeps
@@ -30,6 +31,10 @@ config:
     - "http://192.0.2.10:20833"
   kafka:
     - "192.0.2.10:19092"
+
+  # REQUIRED, and its OWN id — never the primary bridge's. Synthetic, registered
+  # with no p2p service; empty is refused at install time (see values.yaml).
+  peerId: ""
 
   blockchain: "192.0.2.10:20087"
   localAsset: "http://192.0.2.10:20090/api/v1"

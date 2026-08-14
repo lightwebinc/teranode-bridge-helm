@@ -30,10 +30,11 @@ No ConfigMap: there is nothing to mount — the flags are the entire configurati
 ```bash
 # OCI registry — minimum viable delivery-only bridge
 helm install bridge oci://ghcr.io/lightwebinc/charts/teranode-bridge \
-  --version 0.1.0 -n bsv-mcast --create-namespace \
+  --version 0.2.0 -n bsv-mcast --create-namespace \
   --set config.advertise=http://[2001:db8:3f::1]:9145 \
   --set config.propagation[0]=http://192.0.2.10:20833 \
-  --set config.kafka[0]=192.0.2.10:19092
+  --set config.kafka[0]=192.0.2.10:19092 \
+  --set config.peerId=12D3KooW…   # synthetic id, registered with no p2p service
 
 # Or from a local clone — landing tier in front of a cluster, both directions
 helm install bridge . -n bsv-mcast -f examples/landing-tier.yaml \
@@ -90,6 +91,8 @@ The chart fails rather than render a manifest that produces a crashloop or a sil
 | Condition | Why not a warning |
 |---|---|
 | `config.advertise` ends with `config.apiPrefix` | Doubled announce path. Nothing errors at runtime; subtree and block ingest simply stops. |
+| `config.peerId` empty while announcements are configured | Catchup substitutes the announce URL for the missing id, targets the bridge for the header chain, `404`s, and circuit-breaks the cluster out of recovery. |
+| `config.peerId` not `12D3KooW` + 44 base58 chars | An undecodable id is diverted for the wrong reason and fills the cluster's logs with decode errors. |
 | `config.blockchain` set without `config.localAsset` **and** `config.edgeIngress` | The binary exits `2` before any listener opens — a crashloop, not a bridge. |
 | `replicaCount > 1` with reverse path + `config.submitter: true` | Duplicate upward publication of every locally produced object. |
 

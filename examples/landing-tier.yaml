@@ -5,7 +5,8 @@
 # the object plane.
 #
 #   helm install bridge . -f examples/landing-tier.yaml \
-#     --set config.advertise=http://[2001:db8:3f::1]:9145
+#     --set config.advertise=http://[2001:db8:3f::1]:9145 \
+#     --set config.peerId=12D3KooW…
 #
 # hostNetwork because the Teranode cluster is on a LAN, not in this k8s cluster:
 # it must be able to dial the node address named by config.advertise, and the
@@ -34,6 +35,13 @@ config:
     - "http://192.0.2.10:20833"
   kafka:
     - "192.0.2.10:19092"
+
+  # REQUIRED with announcements configured: a SYNTHETIC libp2p id (12D3KooW + 44
+  # base58 chars) derived from a fresh ed25519 key and registered with no p2p
+  # service, so the cluster's catchup gate diverts chain sync to real peers while
+  # its delivery gates keep pulling objects from here. Empty is refused at
+  # install time — see values.yaml.
+  peerId: ""
 
   # Reverse path. localAsset DOES carry the cluster's own /api/v1 prefix.
   blockchain: "192.0.2.10:20087"

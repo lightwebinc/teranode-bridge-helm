@@ -19,6 +19,13 @@ The binary is configured by **CLI flags only** — no environment fallback, no c
 | metrics / health | `9146` | Prometheus, kubelet |
 | reverse path (out) | `8726` / `8727` | this bridge → object-plane ingress |
 
+The tx lane carries **BRC-30 extended format only**. A BRC-12 standard
+transaction parses perfectly well, so the lane checks the EF marker itself and
+refuses it on arrival — counted in `btb_lane_objects_rejected_total{lane="tx"}`,
+connection kept. Deferring that to the cluster's 4xx would be worse than late:
+both serializations share one txid, so the refused copy would first claim the
+dedupe entry and suppress the EF copy behind it.
+
 Two Services, because the two directions have different callers: `<release>-teranode-bridge` carries the delivery lanes plus metrics, and `<release>-teranode-bridge-retrieval` is the cluster-facing pull address (not rendered in `sink` mode, which serves no pulls). Service and container ports are **derived from the `config.*Listen` flags**, so a port can never drift from what the process actually binds.
 
 No ConfigMap: there is nothing to mount — the flags are the entire configuration surface.

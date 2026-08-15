@@ -94,6 +94,9 @@ config:
   # two classes onto one lane shows up as `lane stats dropped`, not as silence.
   # [::] accepts on whatever address the delivery side reaches this pod on; pin
   # to a specific address once the deployment has settled.
+  # The tx lane is BRC-30 EF ONLY: a standard (BRC-12) transaction is refused at
+  # the lane and counted in btb_lane_objects_rejected_total{lane="tx"} — sustained
+  # growth there means a sender is emitting the wrong format, not a sick cluster.
   txListen: "[::]:8833" # -tx-listen      transactions, BRC-30 extended format
   subtreeListen: "[::]:9143" # -subtree-listen BRC-143 push frames
   blockListen: "[::]:9144" # -block-listen   BRC-144 push frames

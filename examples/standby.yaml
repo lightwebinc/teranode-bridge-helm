@@ -7,7 +7,9 @@
 # Identical to the landing tier except it never publishes upward: the subscriber
 # still connects and still runs its origin filter (so remote_skipped keeps
 # counting), but it fetches no assets and submits nothing. Promotion is a flag
-# flip and a restart.
+# flip and a restart — or hands-free: point -submitter-probe (via extraArgs, no
+# .config key) at the primary's /readyz to auto-promote when the primary dies
+# and demote when it returns.
 #
 # This is the ONLY way to run a second bridge against one cluster. Two holders of
 # the submitter role publish every locally produced subtree and block twice onto

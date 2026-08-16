@@ -204,7 +204,7 @@
         "txBatch": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 1024
+          "maximum": 1023
         },
         "txBatchBytes": {
           "type": "integer",

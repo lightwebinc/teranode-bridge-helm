@@ -37,7 +37,7 @@ No ConfigMap: there is nothing to mount — the flags are the entire configurati
 ```bash
 # OCI registry — minimum viable delivery-only bridge
 helm install bridge oci://ghcr.io/lightwebinc/charts/teranode-bridge \
-  --version 0.2.0 -n bsv-mcast --create-namespace \
+  --version 0.3.0 -n bsv-mcast --create-namespace \
   --set config.advertise=http://[2001:db8:3f::1]:9145 \
   --set config.propagation[0]=http://192.0.2.10:20833 \
   --set config.kafka[0]=192.0.2.10:19092 \
@@ -107,7 +107,7 @@ Softer problems (empty `advertise`/`propagation`/`kafka`, an empty `mineTag` wit
 
 ## Values reference
 
-See [`values.yaml`](values.yaml) for the full annotated reference — every flag in [`teranode-bridge/docs/configuration.md`](https://github.com/lightwebinc/teranode-bridge/blob/main/docs/configuration.md) is reachable from `.config`.
+See [`values.yaml`](values.yaml) for the full annotated reference — every flag in [`teranode-bridge/docs/configuration.md`](https://github.com/lightwebinc/teranode-bridge/blob/main/docs/configuration.md) is reachable from `.config`, except the standby-promotion trio (`-submitter-probe`, `-submitter-grace`, `-submitter-when-blind`), which go through `extraArgs`.
 
 ### Flags whose zero value means something
 

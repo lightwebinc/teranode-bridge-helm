@@ -24,7 +24,7 @@ sources:
 maintainers:
   - name: lightwebinc
     url: https://github.com/lightwebinc
-icon: https://raw.githubusercontent.com/lightwebinc/bsv-multicast/main/.assets/icon.png
+icon: https://raw.githubusercontent.com/lightwebinc/bsv-multicast/main/.assets/icon.svg
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |

@@ -216,9 +216,10 @@ config:
   # lane, which closes the TCP window — that backpressure is what bounds memory
   # when the cluster is slower than the fabric, so do not "fix" it with a bigger
   # batch.
-  # -tx-batch: txs per batch, clamped to the server's 1024. NOTE: 0 does NOT mean
-  # per-tx POST /tx — the flag's own help text is stale; the pipeline normalises
-  # anything <= 0 back to 512.
+  # -tx-batch: txs per batch, clamped to 1023 (the server cap is 1024, but a
+  # batch of exactly 1024 is fully processed and THEN answered 400 — see the
+  # binary's -tx-batch help). NOTE: 0 does NOT mean per-tx POST /tx — the
+  # pipeline normalises anything <= 0 back to 512.
   txBatch: 512
   # -tx-batch-bytes: batch body ceiling, clamped to 30 MiB to stay under the
   # server's 32 MiB.

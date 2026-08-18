@@ -174,6 +174,26 @@ describe pod` readable and keeps `--set` free of comma escaping.
        is only meaningful alongside -blockchain. "0s" turns it off; omission
        would restore the binary's 15s. */ -}}
 {{- if $c.blockchain -}}
+{{- /* Transport security mirrors the cluster's GLOBAL security_level_grpc; a
+       mismatch means the reverse path can never connect while every other plane
+       keeps working. Always rendered so the level is visible in the pod spec. */ -}}
+{{- $lvl := 0 -}}
+{{- if not (kindIs "invalid" $c.blockchainSecurityLevel) }}{{ $lvl = int $c.blockchainSecurityLevel }}{{ end }}
+- {{ printf "-blockchain-security-level=%d" $lvl | quote }}
+{{- include "teranode-bridge.flag" (dict "name" "blockchain-ca-cert" "v" $c.blockchainCaCert) -}}
+{{- include "teranode-bridge.flag" (dict "name" "blockchain-cert" "v" $c.blockchainCert) -}}
+{{- include "teranode-bridge.flag" (dict "name" "blockchain-key" "v" $c.blockchainKey) -}}
+{{- /* Keepalive: grpc-go pings NEVER by default, so omission is not a benign
+       default — it is the wedge. Rendered explicitly in both directions. */ -}}
+{{- $ka := "30s" -}}
+{{- if and (not (kindIs "invalid" $c.blockchainKeepalive)) (ne ($c.blockchainKeepalive | toString) "") }}{{ $ka = ($c.blockchainKeepalive | toString) }}{{ end }}
+- {{ printf "-blockchain-keepalive=%s" $ka | quote }}
+{{- $kat := "20s" -}}
+{{- if and (not (kindIs "invalid" $c.blockchainKeepaliveTimeout)) (ne ($c.blockchainKeepaliveTimeout | toString) "") }}{{ $kat = ($c.blockchainKeepaliveTimeout | toString) }}{{ end }}
+- {{ printf "-blockchain-keepalive-timeout=%s" $kat | quote }}
+{{- $kaIdle := true -}}
+{{- if kindIs "bool" $c.blockchainKeepaliveWhenIdle }}{{ $kaIdle = $c.blockchainKeepaliveWhenIdle }}{{ end }}
+- {{ printf "-blockchain-keepalive-when-idle=%v" $kaIdle | quote }}
 {{- $poll := "15s" -}}
 {{- if and (not (kindIs "invalid" $c.clusterPoll)) (ne ($c.clusterPoll | toString) "") }}{{ $poll = ($c.clusterPoll | toString) }}{{ end }}
 - {{ printf "-cluster-poll=%s" $poll | quote }}

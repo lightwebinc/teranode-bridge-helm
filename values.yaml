@@ -210,6 +210,45 @@ config:
   # configuration — give each cluster a distinct tag and repeat it here.
   mineTag: ""
 
+  # ── Blockchain connection: transport security and liveness ────────────────
+  # security_level_grpc is a GLOBAL Teranode setting: a non-zero value wraps
+  # EVERY Teranode gRPC listener, blockchain included, in TLS. A plaintext dial
+  # then cannot connect at all — and the failure is partial in the worst way,
+  # because the delivery lanes, announce and retrieval keep working while only
+  # the reverse path dies as an endless "subscribe failed, retrying".
+  #
+  #   0  plaintext (Teranode's default)
+  #   1  TLS, server certificate NOT verified. Upstream's own comment calls this
+  #      MITM-exploitable by design — it stops passive eavesdropping, nothing
+  #      more. This is the level that matters in practice.
+  #   2  TLS; present a client cert and verify the server against a CA
+  #   3  as 2 client-side; the server additionally requires the client cert
+  #
+  # Levels 2-3 need all three files below. Note that no Teranode CLIENT call
+  # site populates its own cert paths, so a cluster at level 2 or 3 has broken
+  # inter-service gRPC independently of the bridge.
+  blockchainSecurityLevel: 0
+  blockchainCaCert: "" # -blockchain-ca-cert  CA signing the cluster's server cert
+  blockchainCert: "" #    -blockchain-cert     client cert presented to the cluster
+  blockchainKey: "" #     -blockchain-key      key for blockchainCert
+
+  # Keepalive is what stops the reverse path WEDGING. grpc-go's client default
+  # is to never ping; the connection crosses a tunnel, and a silently dropped
+  # path (WireGuard rekey, conntrack eviction, firewall state loss) does not
+  # close the socket — Recv blocks forever and the reconnect loop, entered only
+  # on a Recv error, never runs. The cluster's own keepalive tears down its half
+  # without the client noticing.
+  #
+  # MUST be >= the cluster's grpc_server_min_ping_time_seconds (default 30s) or
+  # the server answers GOAWAY too_many_pings, which the reconnect loop retries —
+  # a liveness mechanism turned into a ping storm. Values below 10s are raised
+  # to 10s (grpc-go's floor); the bridge warns when it does that.
+  blockchainKeepalive: "30s"
+  blockchainKeepaliveTimeout: "20s"
+  # Ping with no stream open, matching grpc_permit_without_stream. Set false if
+  # the cluster sets it false, or it will GOAWAY between reconnects.
+  blockchainKeepaliveWhenIdle: true
+
   # -cluster-poll: how often to read the cluster's FSM state and tip height over
   # the blockchain connection the reverse path already holds. "0s" disables it;
   # it is rendered only when blockchain is set.

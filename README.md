@@ -122,8 +122,8 @@ Omission means "use the binary default", so a flag whose default is non-zero can
 
 `metrics.enabled: false` also removes `/health*`, `/healthz`, `/readyz`, `POST /loglevel`, `/debug/pprof` and both probes, which have nowhere else to point.
 
-> **Chart 0.4.1 requires the 0.6.1 image, which is not published yet.** Run the
-> binary repo's `image-publish.yml` (`confirm=RELEASE`, `tag=0.6.1`) first. This
+> **Chart 0.4.2 requires the 0.6.2 image, which is not published yet.** Run the
+> binary repo's `image-publish.yml` (`confirm=RELEASE`, `tag=0.6.2`) first. This
 > chart renders flags only 0.6.0 understands, and Go exits(2) on an unknown flag
 > — against a 0.5.1 image every pod CrashLoopBackOffs.
 
@@ -138,6 +138,12 @@ Series are `teranode_bridge_*`, on the same `Namespace`/`Subsystem` grid as ever
 | `health.strict: true` | Fails readiness when **any** dependency is down (Teranode's `CheckAll` semantics). Off by default: the retrieval plane serves from a local cache, so a bridge with unreachable Kafka still answers pulls for what it already announced — and Kafka is shared, so gating on it would remove every bridge from the retrieval Service at once. |
 | `tracing.enabled: true` | OTLP/HTTP export. Point `tracing.collectorUrl` at the **same** collector the cluster uses. |
 | `profiling.blockProfileRate` / `mutexProfileFraction` | Non-zero makes `/debug/pprof/block` and `/mutex` return real data; at `0` they return an *empty* profile, not an error. |
+
+#### Blockchain connection
+
+`config.blockchainSecurityLevel` mirrors Teranode's **global** `security_level_grpc`. A non-zero value on the cluster wraps every gRPC listener in TLS, and a plaintext bridge then cannot connect — a failure that hides well, because delivery, announce and retrieval all keep working while only the reverse path retries forever. Levels 2–3 need `blockchainCaCert`, `blockchainCert` and `blockchainKey`; misconfiguration is refused at pod start with the flag named.
+
+`config.blockchainKeepalive` (default `30s`) is not tuning. grpc-go's client pings **never** by default, and the connection crosses a tunnel: a silently dropped path leaves `Recv` blocked forever, and the reconnect loop is only entered on a `Recv` error. It must stay at or above the cluster's `grpc_server_min_ping_time_seconds` (default 30 s) or the server replies `GOAWAY too_many_pings` and the reconnect loop turns that into a ping storm.
 
 `probes.readiness.path` stays `/readyz` and not `/health/readiness`: `/readyz` is the failover contract, polled by a standby bridge against the primary (`config.submitterProbe`). A shared-dependency blip visible to both bridges must not read as "the primary died" — two submitters is worse than a late one.
 

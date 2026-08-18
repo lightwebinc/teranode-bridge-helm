@@ -304,6 +304,31 @@
         "clusterPoll": {
           "type": "string",
           "pattern": "^[0-9]+(ns|us|ms|s|m|h)$"
+        },
+        "blockchainSecurityLevel": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "blockchainCaCert": {
+          "type": "string"
+        },
+        "blockchainCert": {
+          "type": "string"
+        },
+        "blockchainKey": {
+          "type": "string"
+        },
+        "blockchainKeepalive": {
+          "type": "string",
+          "pattern": "^[0-9]+(ns|us|ms|s|m|h)$"
+        },
+        "blockchainKeepaliveTimeout": {
+          "type": "string",
+          "pattern": "^[0-9]+(ns|us|ms|s|m|h)$"
+        },
+        "blockchainKeepaliveWhenIdle": {
+          "type": "boolean"
         }
       }
     },

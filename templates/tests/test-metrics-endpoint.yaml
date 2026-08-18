@@ -25,4 +25,11 @@ spec:
           # /readyz answers 200 only once every lane is bound — the one check
           # that distinguishes a live bridge from a running process.
           wget -q -O - "$base/readyz" > /dev/null
+          # The Teranode-shaped health routes. Liveness must answer even when a
+          # dependency is down, which is the whole point of the split, so it is
+          # checked unconditionally; readiness is checked for reachability with
+          # its status ignored, because an advisory dependency being down is a
+          # legitimate 503 here and must not fail the chart test.
+          wget -q -O - "$base/health/liveness" > /dev/null
+          wget -q -O /dev/null "$base/health/readiness" || true
 {{- end }}

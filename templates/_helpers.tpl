@@ -170,6 +170,14 @@ describe pod` readable and keeps `--set` free of comma escaping.
 {{- include "teranode-bridge.flag" (dict "name" "edge-subtree-port" "v" $c.edgeSubtreePort) -}}
 {{- include "teranode-bridge.flag" (dict "name" "edge-block-port" "v" $c.edgeBlockPort) -}}
 {{- include "teranode-bridge.flag" (dict "name" "mine-tag" "v" $c.mineTag) -}}
+{{- /* Cluster-state poll rides the reverse path's blockchain connection, so it
+       is only meaningful alongside -blockchain. "0s" turns it off; omission
+       would restore the binary's 15s. */ -}}
+{{- if $c.blockchain -}}
+{{- $poll := "15s" -}}
+{{- if and (not (kindIs "invalid" $c.clusterPoll)) (ne ($c.clusterPoll | toString) "") }}{{ $poll = ($c.clusterPoll | toString) }}{{ end }}
+- {{ printf "-cluster-poll=%s" $poll | quote }}
+{{- end -}}
 {{- /* binary default TRUE => always explicit, in both directions */ -}}
 {{- $submitter := true -}}
 {{- if kindIs "bool" $c.submitter }}{{ $submitter = $c.submitter }}{{ end }}
@@ -201,6 +209,35 @@ describe pod` readable and keeps `--set` free of comma escaping.
 {{- else }}
 - "-metrics-addr="
 {{- end }}
+{{- /* Observability shape. All four have binary defaults that are NOT the
+       chart's, or are a migration switch an operator must be able to see in
+       `kubectl describe pod`, so every one is rendered explicitly. */ -}}
+{{- if .Values.metrics.enabled }}
+{{- $legacy := true -}}
+{{- if kindIs "bool" .Values.metrics.legacyPrefix }}{{ $legacy = .Values.metrics.legacyPrefix }}{{ end }}
+- {{ printf "-metrics-legacy-prefix=%v" $legacy | quote }}
+{{- $txHist := false -}}
+{{- if kindIs "bool" .Values.metrics.txSizeHistogram }}{{ $txHist = .Values.metrics.txSizeHistogram }}{{ end }}
+- {{ printf "-tx-size-histogram=%v" $txHist | quote }}
+{{- $strict := false -}}
+{{- if kindIs "bool" .Values.health.strict }}{{ $strict = .Values.health.strict }}{{ end }}
+- {{ printf "-health-strict=%v" $strict | quote }}
+{{- end }}
+{{- /* Tracing: off unless asked for, as upstream. */ -}}
+{{- if .Values.tracing.enabled }}
+- "-tracing-enabled=true"
+{{- include "teranode-bridge.flag" (dict "name" "tracing-collector-url" "v" .Values.tracing.collectorUrl) -}}
+{{- /* The generic flag helper renders numbers through int64, which would turn
+       a 0.01 sample rate into 0 — and 0 is itself a MEANINGFUL rate (sample
+       nothing), so it cannot be dropped as a zero value either. Render it
+       explicitly, as a float, whenever tracing is on. */ -}}
+{{- $rate := 0.01 -}}
+{{- if not (kindIs "invalid" .Values.tracing.sampleRate) }}{{ $rate = .Values.tracing.sampleRate }}{{ end }}
+- {{ printf "-tracing-sample-rate=%v" $rate | quote }}
+{{- end }}
+{{- /* Profiling rates. Zero is the binary default and renders nothing. */ -}}
+{{- include "teranode-bridge.flag" (dict "name" "block-profile-rate" "v" .Values.profiling.blockProfileRate) -}}
+{{- include "teranode-bridge.flag" (dict "name" "mutex-profile-fraction" "v" .Values.profiling.mutexProfileFraction) -}}
 {{- include "teranode-bridge.flag" (dict "name" "log-level" "v" $c.logLevel) -}}
 {{- include "teranode-bridge.flag" (dict "name" "log-format" "v" $c.logFormat) -}}
 {{- include "teranode-bridge.flag" (dict "name" "instance-id" "v" $c.instanceId) -}}

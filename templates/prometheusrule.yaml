@@ -1,0 +1,165 @@
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled }}
+{{- /*
+  Alert rules for the bridge. These are the expressions from
+  docs/references/prometheusMetrics.md in the binary repo, and every one of them
+  covers something the bridge can get wrong that a counter alone does not show.
+
+  `rules` REPLACES this set outright; `additionalRules` appends to it. The
+  submitter-role invariant needs to know which bridges front one cluster, hence
+  clusterSelectorLabel — a fleet-wide sum would report every extra cluster as a
+  double-submitter.
+*/ -}}
+{{- $cl := .Values.metrics.prometheusRule.clusterSelectorLabel | default "cluster" -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "teranode-bridge.fullname" . }}
+  labels:
+    {{- include "teranode-bridge.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: teranode-bridge
+      rules:
+      {{- with .Values.metrics.prometheusRule.rules }}
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+        - alert: BridgeEchoMismatch
+          expr: increase(teranode_bridge_echo_mismatch_total[10m]) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "Object plane returned different bytes than were published"
+            description: >-
+              An object this bridge published came back on its own delivery lanes
+              with different bytes. This is a data-integrity fault in the object
+              plane, not a delivery hiccup, and is never expected to fire.
+
+        - alert: BridgeChainSyncDivertLost
+          expr: rate(teranode_bridge_retrieval_unserved_route_total{class="chain_sync"}[15m]) > 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Cluster is selecting the bridge as a chain-sync source"
+            description: >-
+              Rare bursts accompany multi-peer degradation, but a SUSTAINED rate
+              means the synthetic peer-id no longer diverts catchup — the id was
+              registered, or the cluster's gate semantics changed on upgrade.
+              The next node to fall behind may wedge. Re-verify config.peerId and
+              the cluster's isPeerBad/isPeerMalicious gates.
+
+        - alert: BridgeNoSubmitter
+          expr: sum by ({{ $cl }}) (teranode_bridge_submitter_active) == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No bridge is publishing cluster output upward"
+            description: >-
+              This gauge must sum to exactly 1 per cluster per class. At 0 the
+              cluster's subtrees and blocks are not reaching the object plane at
+              all.
+
+        - alert: BridgeDoubleSubmitter
+          expr: sum by ({{ $cl }}) (teranode_bridge_submitter_active) > 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "More than one bridge holds the submitter role"
+            description: >-
+              Receivers dedup by hash so nothing is corrupted, but the failover
+              logic is confused — most likely a standby promoted while the
+              primary was still publishing.
+
+        - alert: BridgeLaneStalled
+          expr: time() - teranode_bridge_last_object_timestamp_seconds > 900
+          labels:
+            severity: warning
+          annotations:
+            summary: "No delivery on lane {{ "{{ $labels.lane }}" }} for 15 minutes"
+            description: >-
+              Every bridge counter is monotonic, so a stalled lane and a quiet
+              network render identically. This gauge is preset to zero at
+              startup, so it also fires for a bridge that has never received
+              anything.
+
+        - alert: BridgeSubscriptionDead
+          expr: time() - teranode_bridge_last_notification_timestamp_seconds > 300
+          labels:
+            severity: warning
+          annotations:
+            summary: "Blockchain notification stream is silent"
+            description: >-
+              Stamped for every notification type including PINGs, so a live
+              subscription on an idle chain still ticks. Silence means the
+              stream is dead, not that the chain is quiet.
+
+        - alert: BridgeAnnounceBacklog
+          expr: teranode_bridge_kafka_producer_buffered_records > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Announcements are queuing in the Kafka client"
+            description: >-
+              Announcements are backing up rather than failing, so the failure
+              counter stays flat. An object the cluster is never told about is
+              as lost as one that failed to send.
+
+        - alert: BridgeAwaitingPullClimbing
+          expr: teranode_bridge_announce_awaiting_pull > 100
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cluster is not acting on announcements"
+            description: >-
+              Announcements are acked but pulls are not following. Check
+              config.advertise, config.apiPrefix and the topic names — a wrong
+              advertise URL keeps announcing successfully and never gets pulled.
+
+        - alert: BridgeUnattributedSubmits
+          expr: rate(teranode_bridge_txpipe_unattributed_total[15m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "Batch delivery counts are incomplete"
+            description: >-
+              A partial-failure response named transactions that were not in the
+              batch it answered, so those transactions' outcome is UNKNOWN. They
+              are excluded from `accepted` rather than assumed good — delivery
+              counts are incomplete, not merely bad.
+
+        - alert: BridgeSlowRetrieval
+          expr: >-
+            histogram_quantile(0.99, sum by (le, route) (rate(teranode_bridge_retrieval_duration_seconds_bucket[5m]))) > 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cluster pulls are slow on route {{ "{{ $labels.route }}" }}"
+            description: >-
+              The retrieval plane sits on the cluster's block-validation critical
+              path. A slow pull here is indistinguishable, cluster-side, from a
+              slow peer.
+
+        - alert: BridgeClusterNotRunning
+          expr: teranode_bridge_cluster_fsm_state_info{state="RUNNING"} == 0
+          for: 30m
+          labels:
+            severity: info
+          annotations:
+            summary: "Cluster FSM is not RUNNING"
+            description: >-
+              Explains announcements that succeed while nothing is pulled. The
+              bridge deliberately keeps announcing — the cluster is unmodified
+              and decides for itself what to do with an announcement.
+      {{- end }}
+      {{- with .Values.metrics.prometheusRule.additionalRules }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

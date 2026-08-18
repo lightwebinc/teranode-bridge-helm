@@ -21,7 +21,7 @@ The binary is configured by **CLI flags only** — no environment fallback, no c
 
 The tx lane carries **BRC-30 extended format only**. A BRC-12 standard
 transaction parses perfectly well, so the lane checks the EF marker itself and
-refuses it on arrival — counted in `btb_lane_objects_rejected_total{lane="tx"}`,
+refuses it on arrival — counted in `teranode_bridge_lane_objects_rejected_total{lane="tx"}`,
 connection kept. Deferring that to the cluster's 4xx would be worse than late:
 both serializations share one txid, so the refused copy would first claim the
 dedupe entry and suppress the EF copy behind it.
@@ -120,7 +120,26 @@ Omission means "use the binary default", so a flag whose default is non-zero can
 | `config.statsEvery` | `-stats-every=<v>` | `"0s"` means *no periodic stats*; omitted it becomes the binary's `1m`. |
 | `metrics.enabled: false` | `-metrics-addr=` | The only value that switches the listener off. Setting `config.metricsAddr: ""` would be omitted and the binary default `[::]:9146` would apply — metrics you thought you had disabled. |
 
-`metrics.enabled: false` also removes `/healthz`, `/readyz`, `POST /loglevel` and both probes, which have nowhere else to point.
+`metrics.enabled: false` also removes `/health*`, `/healthz`, `/readyz`, `POST /loglevel`, `/debug/pprof` and both probes, which have nowhere else to point.
+
+> **Chart 0.4.0 requires the 0.6.0 image, which is not published yet.** Run the
+> binary repo's `image-publish.yml` (`confirm=RELEASE`, `tag=0.6.0`) first. This
+> chart renders flags only 0.6.0 understands, and Go exits(2) on an unknown flag
+> — against a 0.5.1 image every pod CrashLoopBackOffs.
+
+### Observability
+
+Series are `teranode_bridge_*`, on the same `Namespace`/`Subsystem` grid as every Teranode metric, and the health routes match Teranode's shape (`/health`, `/health/readiness`, `/health/liveness`, JSON dependency body, `?timeout=` override). The full catalogue and the alert expressions are in the [binary repo's metrics reference](https://github.com/lightwebinc/teranode-bridge/blob/main/docs/references/prometheusMetrics.md).
+
+| Value | Effect |
+| --- | --- |
+| `metrics.legacyPrefix: true` (default) | Also emits every pre-existing series under its old `btb_` name, so dashboards written before the rename keep working. Set `false` once migrated. |
+| `metrics.prometheusRule.enabled: true` | Installs the alert rules, including the submitter-role invariant — `sum(teranode_bridge_submitter_active)` must equal exactly **1** per cluster per class. Set `metrics.prometheusRule.clusterSelectorLabel` to whatever label identifies one cluster's bridges, or a fleet-wide sum reports every extra cluster as a double-submitter. |
+| `health.strict: true` | Fails readiness when **any** dependency is down (Teranode's `CheckAll` semantics). Off by default: the retrieval plane serves from a local cache, so a bridge with unreachable Kafka still answers pulls for what it already announced — and Kafka is shared, so gating on it would remove every bridge from the retrieval Service at once. |
+| `tracing.enabled: true` | OTLP/HTTP export. Point `tracing.collectorUrl` at the **same** collector the cluster uses. |
+| `profiling.blockProfileRate` / `mutexProfileFraction` | Non-zero makes `/debug/pprof/block` and `/mutex` return real data; at `0` they return an *empty* profile, not an error. |
+
+`probes.readiness.path` stays `/readyz` and not `/health/readiness`: `/readyz` is the failover contract, polled by a standby bridge against the primary (`config.submitterProbe`). A shared-dependency blip visible to both bridges must not read as "the primary died" — two submitters is worse than a late one.
 
 ### Networking
 
@@ -150,7 +169,7 @@ Set `config.blockchain` to enable it; `config.localAsset` and `config.edgeIngres
 helm test bridge -n bsv-mcast
 ```
 
-Probes `/healthz`, `/metrics` and `/readyz` on the metrics Service. `/readyz` answers `200` only once **every** lane is bound — the one check that distinguishes a live bridge from a running process.
+Probes `/healthz`, `/metrics`, `/readyz` and the Teranode-shaped health routes on the metrics Service. `/readyz` answers `200` only once **every** lane is bound — the one check that distinguishes a live bridge from a running process. `/health/readiness` is probed for reachability only, since an advisory dependency being down is a legitimate `503` there.
 
 ## Release
 

@@ -66,6 +66,33 @@
         "path": {
           "type": "string",
           "pattern": "^/"
+        },
+        "legacyPrefix": {
+          "type": "boolean"
+        },
+        "txSizeHistogram": {
+          "type": "boolean"
+        },
+        "prometheusRule": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "labels": {
+              "type": "object"
+            },
+            "clusterSelectorLabel": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rules": {
+              "type": "array"
+            },
+            "additionalRules": {
+              "type": "array"
+            }
+          }
         }
       }
     },
@@ -273,6 +300,109 @@
         },
         "debug": {
           "type": "boolean"
+        },
+        "clusterPoll": {
+          "type": "string",
+          "pattern": "^[0-9]+(ns|us|ms|s|m|h)$"
+        }
+      }
+    },
+    "health": {
+      "type": "object",
+      "properties": {
+        "strict": {
+          "type": "boolean"
+        }
+      }
+    },
+    "tracing": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "collectorUrl": {
+          "type": "string",
+          "pattern": "^https?://"
+        },
+        "sampleRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "profiling": {
+      "type": "object",
+      "properties": {
+        "blockProfileRate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mutexProfileFraction": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "probes": {
+      "type": "object",
+      "properties": {
+        "readiness": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "liveness": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       }
     }

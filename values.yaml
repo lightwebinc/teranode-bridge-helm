@@ -95,7 +95,7 @@ config:
   # [::] accepts on whatever address the delivery side reaches this pod on; pin
   # to a specific address once the deployment has settled.
   # The tx lane is BRC-30 EF ONLY: a standard (BRC-12) transaction is refused at
-  # the lane and counted in btb_lane_objects_rejected_total{lane="tx"} — sustained
+  # the lane and counted in teranode_bridge_lane_objects_rejected_total{lane="tx"} — sustained
   # growth there means a sender is emitting the wrong format, not a sick cluster.
   txListen: "[::]:8833" # -tx-listen      transactions, BRC-30 extended format
   subtreeListen: "[::]:9143" # -subtree-listen BRC-143 push frames
@@ -204,11 +204,24 @@ config:
   # BEFORE the fabric delivered it looks locally produced — without the tag the
   # reverse path republishes a remote block upward with false attribution. With
   # it, only blocks whose in-band coinbase carries the tag go up; the rest count
-  # in btb_reverse_skipped_total{reason="foreign_origin"}. The check is derived
+  # in teranode_bridge_reverse_skipped_total{reason="foreign_origin"}. The check is derived
   # from block content, so it survives a restart (which wipes the seen-registry).
   # Needs no Teranode change: coinbase_arbitrary_text is existing per-node
   # configuration — give each cluster a distinct tag and repeat it here.
   mineTag: ""
+
+  # -cluster-poll: how often to read the cluster's FSM state and tip height over
+  # the blockchain connection the reverse path already holds. "0s" disables it;
+  # it is rendered only when blockchain is set.
+  #
+  # Advisory only — the bridge announces and submits identically whatever state
+  # the cluster is in, because the cluster is unmodified and decides for itself.
+  # It exists because the most common degraded case otherwise has no visible
+  # cause from the bridge's own metrics: announcements succeed, pulls never
+  # follow, and every bridge counter looks healthy. Publishes
+  # teranode_bridge_cluster_fsm_state and teranode_bridge_cluster_block_height,
+  # and reports both under BlockchainFSM in /health.
+  clusterPoll: "15s"
 
   # ── Transaction pipeline ───────────────────────────────────────────────────
   # The tx lane never submits synchronously: objects are enqueued to a batching
@@ -310,10 +323,27 @@ service:
 
 metrics:
   # false renders -metrics-addr= (explicitly empty) to switch off the listener
-  # entirely — /metrics, /healthz, /readyz and POST /loglevel all go with it,
-  # and so do the probes below, which have nowhere else to point.
+  # entirely — /metrics, /health*, /healthz, /readyz, POST /loglevel and
+  # /debug/pprof all go with it, and so do the probes below, which have nowhere
+  # else to point.
   enabled: true
   path: /metrics
+
+  # Series are teranode_bridge_* — the Namespace/Subsystem pair that names every
+  # Teranode metric, so a bridge lands on the same grid as the cluster it fronts.
+  # true ALSO emits every pre-existing series under its old btb_ name, so
+  # dashboards written before the rename keep working through the cutover. Set
+  # false once they are migrated; the alias is scheduled for removal in the
+  # release after next. Metrics introduced with the new naming are never aliased.
+  legacyPrefix: true
+
+  # Per-object size histogram on the TX lane. Off by default: the lane bytes
+  # counter already gives the mean, and at megatransaction-per-second rates a
+  # bucketed observation per object is real work on the read path. The subtree
+  # and block lanes always observe it — orders of magnitude lower rate, and a
+  # genuinely informative distribution.
+  txSizeHistogram: false
+
   serviceMonitor:
     enabled: false
     interval: 30s
@@ -322,19 +352,90 @@ metrics:
     relabelings: []
     metricRelabelings: []
 
+  # Alert rules. Requires the Prometheus Operator. The defaults are the
+  # expressions from docs/references/prometheusMetrics.md; `additionalRules` is
+  # appended verbatim, and `rules: []` replaces the built-in set entirely.
+  prometheusRule:
+    enabled: false
+    labels: {}
+    # Cluster identity for the submitter-role invariant. Both alerts sum
+    # teranode_bridge_submitter_active across the bridges in front of ONE
+    # cluster, so this must select exactly that set — a fleet-wide sum would
+    # report every extra cluster as a double-submitter.
+    clusterSelectorLabel: cluster
+    rules: []
+    additionalRules: []
+
+# Dependency health, reported by /health, /health/readiness and
+# /health/liveness in the same JSON shape Teranode uses.
+health:
+  # true fails readiness when ANY dependency is down — Teranode's all-or-nothing
+  # CheckAll behaviour.
+  #
+  # Off by default, and the reason is worth reading before turning it on: the
+  # retrieval plane serves out of a local cache, so a bridge whose Kafka is
+  # unreachable still answers every pull for objects it has ALREADY announced.
+  # Kafka, propagation and the asset service are shared by every bridge in front
+  # of a cluster, so gating on them removes all of those bridges from the
+  # retrieval Service at the same instant — stranding exactly those fetches, and
+  # turning a degraded announce path into lost objects (Teranode does not retry
+  # a failed subtree fetch).
+  #
+  # With strict off, only conditions THIS pod alone can be in gate readiness:
+  # its delivery lanes and its retrieval listener. Everything else is reported
+  # in the body but does not fail the aggregate.
+  strict: false
+
+# OpenTelemetry tracing. Off by default, as upstream. Even when off the W3C
+# propagator is installed, so incoming trace context is parsed and forwarded
+# rather than dropped — a disabled bridge declines to contribute to a trace, it
+# does not break one.
+#
+# The boundary that matters most is the retrieval plane: the cluster's fetch
+# happens INSIDE its block-validation span, so without extraction there "why was
+# this block slow to validate" dead-ends at the bridge.
+tracing:
+  enabled: false
+  # Point at the same collector the cluster uses, or traces land in two places.
+  collectorUrl: "http://localhost:4318"
+  # Head sampling for ROOT spans only; child spans inherit the parent decision,
+  # so a sampled cluster trace stays sampled across the bridge.
+  sampleRate: 0.01
+
+# Profile rates. Both default to 0, which is the Go default: the endpoints
+# exist either way, but return an EMPTY profile rather than an error — which
+# reads as "no contention" during exactly the investigation that needs the
+# opposite answer. Neither is free; turn one on for a specific investigation.
+profiling:
+  blockProfileRate: 0
+  mutexProfileFraction: 0
+
 # /readyz turns 200 once EVERY lane is bound — before that the bridge cannot
 # accept delivery, so gate anything that steers traffic on readiness, not on the
 # pod merely running. /healthz is always 200: it proves the process is alive,
 # nothing more, which is exactly what a liveness probe should assert.
+#
+# The paths are configurable but the defaults are deliberate:
+#
+#   * readiness stays on /readyz, NOT /health/readiness. /readyz is the failover
+#     contract — a standby bridge polls the PRIMARY's /readyz to decide whether
+#     to promote itself (config.submitterProbe). Pointing k8s readiness at the
+#     dependency-aware route is fine on its own, but the two must not be
+#     confused: a shared-dependency blip that both bridges see would otherwise
+#     look like the primary dying, and two submitters is worse than a late one.
+#   * liveness stays on /healthz. /health/liveness returns the same verdict with
+#     a richer body; either works, and neither probes dependencies.
 probes:
   readiness:
     enabled: true
+    path: /readyz
     initialDelaySeconds: 3
     periodSeconds: 10
     timeoutSeconds: 3
     failureThreshold: 3
   liveness:
     enabled: true
+    path: /healthz
     initialDelaySeconds: 10
     periodSeconds: 30
     timeoutSeconds: 5

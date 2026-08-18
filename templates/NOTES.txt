@@ -73,17 +73,31 @@ fetch. Scale with one release per bridge, each with its own config.advertise.
 
 {{- if .Values.metrics.enabled }}
 
-Metrics: http://{{ $full }}.{{ .Release.Namespace }}.svc:{{ include "teranode-bridge.port" ($c.metricsAddr | default "[::]:9146") }}{{ .Values.metrics.path }}  (btb_* ; also /healthz, /readyz, POST /loglevel)
+Metrics: http://{{ $full }}.{{ .Release.Namespace }}.svc:{{ include "teranode-bridge.port" ($c.metricsAddr | default "[::]:9146") }}{{ .Values.metrics.path }}  (teranode_bridge_* ; also /health, /health/readiness, /health/liveness, /healthz, /readyz, POST /loglevel, /debug/pprof)
 {{- if and (not $sink) $c.blockchain }}
-Alert on btb_echo_mismatch_total > 0 — the object plane returned different bytes
+Alert on teranode_bridge_echo_mismatch_total > 0 — the object plane returned different bytes
 than this bridge published. That is a data-integrity fault, not a delivery
 hiccup, and the series is present at zero from startup so `== 0` is valid
 immediately after a restart.
 {{- end }}
+{{- if .Values.metrics.legacyPrefix }}
+Series are ALSO emitted under the old btb_ prefix (metrics.legacyPrefix=true) so
+existing dashboards keep working. Set it false once they are migrated.
+{{- end }}
+{{- if not .Values.metrics.prometheusRule.enabled }}
+No alert rules installed. Set metrics.prometheusRule.enabled=true (needs the
+Prometheus Operator) for the rules in the binary repo's metrics reference —
+including the submitter-role invariant, which must sum to exactly 1 per cluster.
+{{- end }}
+{{- if .Values.tracing.enabled }}
+Tracing ON -> {{ .Values.tracing.collectorUrl }} at sample rate {{ .Values.tracing.sampleRate }}.
+Point this at the SAME collector the cluster uses or traces land in two places.
+{{- end }}
 {{- else }}
 
-NOTE: metrics.enabled=false — no /metrics, /healthz, /readyz or POST /loglevel,
-and therefore no probes. The bridge only reports through its stats log lines.
+NOTE: metrics.enabled=false — no /metrics, /health*, /healthz, /readyz,
+POST /loglevel or /debug/pprof, and therefore no probes. The bridge only reports
+through its stats log lines.
 {{- end }}
 
 Rendered args:

@@ -122,8 +122,8 @@ Omission means "use the binary default", so a flag whose default is non-zero can
 
 `metrics.enabled: false` also removes `/health*`, `/healthz`, `/readyz`, `POST /loglevel`, `/debug/pprof` and both probes, which have nowhere else to point.
 
-> **Chart 0.4.0 requires the 0.6.0 image, which is not published yet.** Run the
-> binary repo's `image-publish.yml` (`confirm=RELEASE`, `tag=0.6.0`) first. This
+> **Chart 0.4.1 requires the 0.6.1 image, which is not published yet.** Run the
+> binary repo's `image-publish.yml` (`confirm=RELEASE`, `tag=0.6.1`) first. This
 > chart renders flags only 0.6.0 understands, and Go exits(2) on an unknown flag
 > — against a 0.5.1 image every pod CrashLoopBackOffs.
 

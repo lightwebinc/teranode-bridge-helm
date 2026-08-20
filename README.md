@@ -12,7 +12,7 @@ The binary is configured by **CLI flags only** — no environment fallback, no c
 
 | Plane | Port (default) | Who dials it |
 |---|---|---|
-| tx lane (BRC-30 EF) | `8833` | the delivery side |
+| tx lane (BRC-30 EF) | `8725` | the delivery side |
 | subtree lane (BRC-143) | `9143` | the delivery side |
 | block lane (BRC-144) | `9144` | the delivery side |
 | retrieval plane | `9145` | **the Teranode cluster**, pulling what was announced |

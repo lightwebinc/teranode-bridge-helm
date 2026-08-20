@@ -23,7 +23,7 @@ networking:
     dnsPolicy: ClusterFirstWithHostNet
 
 config:
-  txListen: "[2001:db8:3f::2]:8833"
+  txListen: "[2001:db8:3f::2]:8725"
   subtreeListen: "[2001:db8:3f::2]:9143"
   blockListen: "[2001:db8:3f::2]:9144"
   retrievalListen: "[2001:db8:3f::2]:9145"

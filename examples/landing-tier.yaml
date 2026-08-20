@@ -22,7 +22,7 @@ networking:
 
 config:
   # Pinned to the delivery-facing address now that the deployment has settled.
-  txListen: "[2001:db8:3f::1]:8833"
+  txListen: "[2001:db8:3f::1]:8725"
   subtreeListen: "[2001:db8:3f::1]:9143"
   blockListen: "[2001:db8:3f::1]:9144"
 

@@ -44,7 +44,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{/*
 port — the port a listen address binds, so containerPort/Service port can never
 drift from the flag the process actually gets. Input is the raw listen string
-("[::]:8833", "192.0.2.10:9145", ":9146"); output is the trailing number.
+("[::]:8725", "192.0.2.10:9145", ":9146"); output is the trailing number.
 */}}
 {{- define "teranode-bridge.port" -}}
 {{- $addr := . | toString -}}

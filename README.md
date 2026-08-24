@@ -17,7 +17,7 @@ The binary is configured by **CLI flags only** — no environment fallback, no c
 | block lane (BRC-144) | `9144` | the delivery side |
 | retrieval plane | `9145` | **the Teranode cluster**, pulling what was announced |
 | metrics / health | `9146` | Prometheus, kubelet |
-| reverse path (out) | `8726` / `8727` | this bridge → object-plane ingress |
+| reverse path (out) | `9143` / `9144` | this bridge → object-plane ingress |
 
 The tx lane carries **BRC-30 extended format only**. A BRC-12 standard
 transaction parses perfectly well, so the lane checks the EF marker itself and

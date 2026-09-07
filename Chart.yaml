@@ -1,8 +1,8 @@
 apiVersion: v2
 name: teranode-bridge
-description: Landing-tier shim for pushed delivery into an unmodified Teranode cluster — terminates the tx/subtree/block delivery lanes, announces and serves the cluster's pulls, and publishes cluster-produced subtrees and blocks back onto the object plane
+description: Landing-tier bridge for pushed delivery into an unmodified Teranode cluster — terminates the tx/subtree/block delivery lanes, announces and serves the cluster's pulls, and publishes cluster-produced subtrees and blocks back onto the object plane
 type: application
-version: 0.6.0
+version: 0.6.1
 # appVersion MUST equal a tag published on ghcr.io/lightwebinc/teranode-bridge
 # (the chart's tag:"" default pulls this). Images are published manually via the
 # binary repo's image-publish.yml workflow; bump appVersion ONLY in lockstep with
@@ -28,6 +28,8 @@ icon: https://raw.githubusercontent.com/lightwebinc/bsv-multicast/main/.assets/i
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: wording — the component is described as a landing-tier bridge throughout; no template or value changes
     - kind: changed
       description: appVersion 0.8.0 — the seam packages (lanes, cache, retrieval, reverse, announce, registry, hashid, encode, tnwire) are public Go packages and documented extension points; no flag or wire changes
     - kind: changed

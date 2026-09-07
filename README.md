@@ -2,7 +2,7 @@
 
 > Part of the [**BSV Layered Multicast**](https://github.com/lightwebinc/bsv-multicast) open-source project — see the main repository for the full architecture, design docs, and BRC specifications.
 
-Helm chart for [teranode-bridge](https://github.com/lightwebinc/teranode-bridge) — the landing-tier shim for pushed delivery into an **unmodified** Teranode cluster.
+Helm chart for [teranode-bridge](https://github.com/lightwebinc/teranode-bridge) — the landing-tier bridge for pushed delivery into an **unmodified** Teranode cluster.
 
 This repository packages templates, default values, JSON Schema validation, and CI workflows for the bridge. The application source lives in [`teranode-bridge`](https://github.com/lightwebinc/teranode-bridge).
 

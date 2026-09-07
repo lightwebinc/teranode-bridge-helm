@@ -1,5 +1,0 @@
-owner: lightwebinc
-git-repo: teranode-bridge-helm
-package-path: .cr-release-packages
-skip-existing: true
-sign: false

@@ -18,7 +18,6 @@ jobs:
   release:
     if: github.event.inputs.confirm == 'RELEASE'
     runs-on: ubuntu-latest
-    environment: production
     steps:
       - uses: actions/checkout@v6
         with:

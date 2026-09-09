@@ -185,8 +185,8 @@ config:
   # -edge-ingress: object-plane ingress host for upward submits, typically
   # reachable only over the delivery link.
   edgeIngress: ""
-  edgeSubtreePort: 9143 # -edge-subtree-port bare BRC-143 subtree submits
-  edgeBlockPort: 9144 # -edge-block-port   bare BRC-144 block submits
+  edgeSubtreePort: 8726 # -edge-subtree-port BRC-143 submits to the edge PROXY (fabric lane number; 9143 is the consumer-side delivery listen)
+  edgeBlockPort: 8727 # -edge-block-port   BRC-144 submits to the edge PROXY (fabric lane number; 9144 is the consumer-side delivery listen)
 
   # -submitter: hold the submitter role. EXACTLY ONE bridge per class per cluster
   # may hold it — two submitters publish the same block twice onto the object

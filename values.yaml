@@ -165,7 +165,7 @@ config:
   # the catchup gate divert chain sync to real libp2p peers while every
   # delivery gate (bans only) keeps pulling objects from the bridge. One id per
   # bridge instance; never reuse a real peer's. Watch
-  # btb_retrieval_unserved_route_total{class="chain_sync"} — sustained growth
+  # teranode_bridge_retrieval_unserved_route_total{class="chain_sync"} — sustained growth
   # means the divert has regressed on a cluster upgrade.
   peerId: ""
 
@@ -175,7 +175,9 @@ config:
   # incomplete set at install time rather than letting the binary exit 2 into a
   # crashloop).
   # -blockchain: cluster blockchain gRPC host:port, e.g. "192.0.2.10:20087".
-  # The connection is PLAINTEXT AND UNAUTHENTICATED — keep it on a trusted LAN.
+  # At the default blockchainSecurityLevel 0 the connection is PLAINTEXT AND
+  # UNAUTHENTICATED — keep it on a trusted LAN, or match the cluster's
+  # security_level_grpc below.
   blockchain: ""
   # -local-asset: cluster asset base URL INCLUDING its API prefix, e.g.
   # "http://192.0.2.10:20090/api/v1". The easy thing to get backwards: unlike
@@ -313,7 +315,8 @@ config:
   # "0s" disables periodic stats (a final block is still logged at shutdown),
   # which omission would turn back into the binary's 1m.
   statsEvery: "1m"
-  # -metrics-addr: HTTP listener for /metrics, /healthz, /readyz, /loglevel.
+  # -metrics-addr: HTTP listener for /metrics, /health*, /healthz, /readyz,
+  #                /loglevel and /debug/pprof.
   # The probes below hang off this listener — see metrics.enabled to turn the
   # whole thing off (setting this to "" here would NOT: an empty value is
   # omitted and the binary default [::]:9146 would apply).
@@ -458,7 +461,7 @@ profiling:
 #
 #   * readiness stays on /readyz, NOT /health/readiness. /readyz is the failover
 #     contract — a standby bridge polls the PRIMARY's /readyz to decide whether
-#     to promote itself (config.submitterProbe). Pointing k8s readiness at the
+#     to promote itself (-submitter-probe, via extraArgs). Pointing k8s readiness at the
 #     dependency-aware route is fine on its own, but the two must not be
 #     confused: a shared-dependency blip that both bridges see would otherwise
 #     look like the primary dying, and two submitters is worse than a late one.

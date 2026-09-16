@@ -17,7 +17,7 @@ The binary is configured by **CLI flags only** — no environment fallback, no c
 | block lane (BRC-144) | `9144` | the delivery side |
 | retrieval plane | `9145` | **the Teranode cluster**, pulling what was announced |
 | metrics / health | `9146` | Prometheus, kubelet |
-| reverse path (out) | `9143` / `9144` | this bridge → object-plane ingress |
+| reverse path (out) | `8726` / `8727` | this bridge → the edge proxy's fabric-side object ingress |
 
 The tx lane carries **BRC-30 extended format only**. A BRC-12 standard
 transaction parses perfectly well, so the lane checks the EF marker itself and
@@ -37,7 +37,7 @@ No ConfigMap: there is nothing to mount — the flags are the entire configurati
 ```bash
 # OCI registry — minimum viable delivery-only bridge
 helm install bridge oci://ghcr.io/lightwebinc/charts/teranode-bridge \
-  --version 0.3.0 -n bsv-mcast --create-namespace \
+  --version 0.7.0 -n bsv-mcast --create-namespace \
   --set config.advertise=http://[2001:db8:3f::1]:9145 \
   --set config.propagation[0]=http://192.0.2.10:20833 \
   --set config.kafka[0]=192.0.2.10:19092 \
@@ -122,10 +122,10 @@ Omission means "use the binary default", so a flag whose default is non-zero can
 
 `metrics.enabled: false` also removes `/health*`, `/healthz`, `/readyz`, `POST /loglevel`, `/debug/pprof` and both probes, which have nowhere else to point.
 
-> **Chart 0.4.2 requires the 0.6.2 image, which is not published yet.** Run the
-> binary repo's `image-publish.yml` (`confirm=RELEASE`, `tag=0.6.2`) first. This
-> chart renders flags only 0.6.0 understands, and Go exits(2) on an unknown flag
-> — against a 0.5.1 image every pod CrashLoopBackOffs.
+> The chart renders flags the pinned `appVersion` image understands, and Go
+> exits(2) on an unknown flag — pointing `image.tag` at an older image than
+> `appVersion` CrashLoopBackOffs every pod. Publish the image first, then bump
+> `appVersion` (the contract in [`Chart.yaml`](Chart.yaml)).
 
 ### Observability
 
@@ -145,7 +145,7 @@ Series are `teranode_bridge_*`, on the same `Namespace`/`Subsystem` grid as ever
 
 `config.blockchainKeepalive` (default `30s`) is not tuning. grpc-go's client pings **never** by default, and the connection crosses a tunnel: a silently dropped path leaves `Recv` blocked forever, and the reconnect loop is only entered on a `Recv` error. It must stay at or above the cluster's `grpc_server_min_ping_time_seconds` (default 30 s) or the server replies `GOAWAY too_many_pings` and the reconnect loop turns that into a ping storm.
 
-`probes.readiness.path` stays `/readyz` and not `/health/readiness`: `/readyz` is the failover contract, polled by a standby bridge against the primary (`config.submitterProbe`). A shared-dependency blip visible to both bridges must not read as "the primary died" — two submitters is worse than a late one.
+`probes.readiness.path` stays `/readyz` and not `/health/readiness`: `/readyz` is the failover contract, polled by a standby bridge against the primary (`-submitter-probe`, via `extraArgs`). A shared-dependency blip visible to both bridges must not read as "the primary died" — two submitters is worse than a late one.
 
 ### Networking
 
@@ -167,7 +167,7 @@ Size `config.cacheTtl` against **validation lag** (seconds), not retention. An e
 Set `config.blockchain` to enable it; `config.localAsset` and `config.edgeIngress` become mandatory. Two things to get right:
 
 - **`config.mineTag`** — this cluster's `coinbase_arbitrary_text`. Blockchain notifications carry no origin, so a block learned over libp2p *before* the fabric delivered it looks locally produced; without the tag the bridge republishes a remote block upward with false attribution. The check is derived from block content, so it survives the restart that wipes the seen-registry. Needs no Teranode change.
-- **The gRPC connection to the blockchain service is plaintext and unauthenticated.** Keep it on a trusted LAN.
+- **The gRPC connection to the blockchain service is plaintext and unauthenticated at the default `config.blockchainSecurityLevel: 0`.** Keep it on a trusted LAN, or match the cluster's `security_level_grpc` (see [Blockchain connection](#blockchain-connection)).
 
 ## Helm test
 
@@ -179,7 +179,7 @@ Probes `/healthz`, `/metrics`, `/readyz` and the Teranode-shaped health routes o
 
 ## Release
 
-The `release.yml` workflow is gated. It runs only via `workflow_dispatch` with `confirm: RELEASE` and a `production` GitHub Environment review. Tag-based auto-release is intentionally disabled.
+The `release.yml` workflow is gated. It runs only via `workflow_dispatch` with `confirm: RELEASE`. Tag-based auto-release is intentionally disabled, and the chart is OCI-only: no git tag is created.
 
 ## License
 

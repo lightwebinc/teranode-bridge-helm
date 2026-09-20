@@ -2,7 +2,7 @@ apiVersion: v2
 name: teranode-bridge
 description: Landing-tier bridge for pushed delivery into an unmodified Teranode cluster — terminates the tx/subtree/block delivery lanes, announces and serves the cluster's pulls, and publishes cluster-produced subtrees and blocks back onto the object plane
 type: application
-version: 0.7.0
+version: 0.8.0
 # appVersion MUST equal a tag published on ghcr.io/lightwebinc/teranode-bridge
 # (the chart's tag:"" default pulls this). Images are published manually via the
 # binary repo's image-publish.yml workflow; bump appVersion ONLY in lockstep with
@@ -28,6 +28,8 @@ icon: https://raw.githubusercontent.com/lightwebinc/bsv-multicast/main/.assets/i
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: tunnel.* — pod-attached landing. An opt-in WireGuard sidecar terminates the delivery tunnel inside the bridge pod (outbound dial, shared network namespace), reading the provisioned wg-quick file from a Secret; refuses host networking, replicaCount > 1, a placeholder private key and a default route in AllowedIPs; native sidecar on Kubernetes 1.29+; handshake-age liveness; examples/pod-attached.yaml
     - kind: changed
       description: appVersion 0.9.0 — default reverse-path submit ports are 8726/8727, the edge proxy's fabric-side object ingress; 9143/9144 are the consumer-side delivery lanes this bridge listens on, and nothing in the fabric listens on them
     - kind: changed

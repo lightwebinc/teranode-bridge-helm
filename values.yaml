@@ -82,9 +82,124 @@ networking:
   host:
     dnsPolicy: ClusterFirstWithHostNet
 
+# Pod-attached tunnel: terminate the consumer end of the delivery tunnel INSIDE
+# this pod, in a WireGuard sidecar that shares the pod's network namespace with
+# the bridge. The sidecar dials OUT to the delivery edge and holds the session
+# with keepalives; the edge then dials the three lanes back through the tunnel,
+# and they arrive on the bridge's wildcard listeners. The cluster needs no
+# public address, NodePort, LoadBalancer, BGP session or inbound firewall rule,
+# and no separate landing box. Off by default: with it off, the tunnel lands
+# wherever you terminate it (a landing server, a router, the node) and reaches
+# the lanes through the Service or a host port.
+#
+# Read README "Pod-attached tunnel" before enabling. The short form:
+#   * networking.mode must be pod, and replicaCount must be 1: a WireGuard key
+#     is ONE session, so two pods holding it would steal the tunnel from each
+#     other every few seconds. The chart refuses both, and switches the rollout
+#     to Recreate for the same reason. Scale by adding releases, one per tunnel.
+#   * The sidecar is the ONLY privileged thing in the pod: it runs as root with
+#     NET_ADMIN (and nothing else) to create the interface. Pod Security
+#     Standards `baseline` and `restricted` both forbid NET_ADMIN, so the
+#     namespace needs `pod-security.kubernetes.io/enforce: privileged`. The
+#     bridge container keeps nonroot, drop ALL, read-only root filesystem.
+#   * Keep the lanes on [::] (the chart default). The tunnel address appears
+#     when the sidecar finishes its handshake, so a wildcard bind means start
+#     order does not matter and a re-handshake needs no restart.
+#   * networkPolicy.laneIngressFrom does nothing here: lane traffic arrives on
+#     the WireGuard interface inside the pod, never through the CNI. Restrict
+#     it with the tunnel's AllowedIPs. The retrieval and metrics rules still
+#     apply, because the cluster and Prometheus reach the pod through the CNI.
+tunnel:
+  enabled: false
+
+  # Any image with bash, wg-quick and iproute2. This one is ~7 MB of Alpine and
+  # wireguard-tools. Mirror it or replace it freely; nothing else is assumed.
+  image:
+    repository: docker.io/procustodibus/wireguard
+    tag: "v1.0.20260223-i260913"
+    pullPolicy: IfNotPresent
+
+  # The tunnel's wg-quick configuration, exactly as downloaded when the delivery
+  # slot was provisioned, with YOUR private key pasted in. It holds a private
+  # key, so it is only ever read from a Secret you create out of band:
+  #   kubectl create secret generic <name> --from-file=wg0.conf=./wg0.conf
+  # REQUIRED when enabled. The sidecar refuses to start on the unedited
+  # placeholder key, and on a default route in AllowedIPs (that would pull the
+  # bridge's own traffic to Kafka and propagation into the tunnel). A DNS= line
+  # is dropped: the pod keeps the cluster's resolver.
+  configSecret:
+    name: ""
+    key: wg0.conf
+
+  # Interface name inside the pod; at most 15 characters.
+  interface: wg0
+
+  # Written into the config only when it carries no MTU of its own. WireGuard
+  # adds 80 B over an IPv6 underlay (40 IPv6 + 8 UDP + 16 header + 16 tag), so
+  # 1420 fits a 1500 B path. Lower it if the path to the edge is narrower; the
+  # symptom of too large a value is small objects arriving and large ones
+  # stalling. 0 leaves the choice to wg-quick.
+  mtu: 1420
+
+  # false = kernel WireGuard only, which needs the `wireguard` module on the
+  # NODE (in mainline since 5.6; check with `ip link add wg-test type wireguard`
+  # there). true also mounts the node's /dev/net/tun, so wg-quick falls back to
+  # userspace wireguard-go when the kernel has no module. Slower, and it needs
+  # an IMAGE THAT SHIPS wireguard-go; the default one does not.
+  userspace: false
+
+  # true runs the sidecar as a native sidecar (an init container with
+  # restartPolicy: Always, Kubernetes >= 1.29): it starts before the bridge and,
+  # what matters more, stops AFTER it, so a terminating bridge drains its lanes
+  # over a tunnel that is still up. false runs it as an ordinary container for
+  # older clusters; it then holds the tunnel up for shutdownDelaySeconds after
+  # SIGTERM to cover the same drain.
+  nativeSidecar: true
+  shutdownDelaySeconds: 10
+
+  # Restart the sidecar (never the bridge) when no peer has handshaken for this
+  # long. PersistentKeepalive in the provisioned config keeps a healthy session
+  # handshaking every couple of minutes whether or not objects are flowing, so
+  # silence this long means the session is gone. The restart also re-resolves
+  # the edge's hostname, which a running WireGuard interface never does.
+  livenessProbe:
+    enabled: true
+    maxHandshakeAgeSeconds: 300
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Root plus NET_ADMIN is the floor for creating an interface and its routes;
+  # everything else stays dropped.
+  securityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+    runAsGroup: 0
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+      add: ["NET_ADMIN"]
+
+  # Kernel WireGuard does its work in the kernel, outside this container's
+  # accounting, so the container itself is nearly idle. Raise the CPU limit for
+  # userspace: there the encryption runs here.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 200m
+      memory: 64Mi
+
+  extraEnv: []
+
 # Empty => RollingUpdate for networking.mode=pod, Recreate for host (a rolling
 # update cannot bind the same host ports twice, so the new pod would sit in
-# CrashLoopBackOff until the old one goes away). Set explicitly to override.
+# CrashLoopBackOff until the old one goes away) and for tunnel.enabled (a
+# surged second pod would hold the same WireGuard key and steal the session
+# from the pod still serving). Set explicitly to override.
 updateStrategy: {}
 
 config:
@@ -515,7 +630,9 @@ podDisruptionBudget:
 # separate keys rather than one blanket rule — the delivery side has no business
 # reaching the retrieval plane, and the cluster none reaching the lanes.
 # Ignored under networking.mode=host (host traffic never enters the pod network;
-# restrict it with the node firewall).
+# restrict it with the node firewall). With tunnel.enabled the lane rule is
+# inert for the same kind of reason: the lanes arrive on the WireGuard interface
+# inside the pod, so restrict them with the tunnel's AllowedIPs instead.
 networkPolicy:
   enabled: false
   laneIngressFrom: [] # tx/subtree/block — the delivery side

@@ -24,6 +24,11 @@ spec:
          pod crashlooping on "address already in use" until the old one died. */}}
   strategy:
     type: Recreate
+  {{- else if .Values.tunnel.enabled }}
+  {{- /* One WireGuard key is one session: a surged pod would take the tunnel
+         away from the pod that is still serving. */}}
+  strategy:
+    type: Recreate
   {{- end }}
   template:
     metadata:
@@ -68,6 +73,10 @@ spec:
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if and .Values.tunnel.enabled .Values.tunnel.nativeSidecar }}
+      initContainers:
+        {{- include "teranode-bridge.tunnelContainer" . | nindent 8 }}
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
@@ -133,6 +142,26 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+        {{- if and .Values.tunnel.enabled (not .Values.tunnel.nativeSidecar) }}
+        {{- include "teranode-bridge.tunnelContainer" . | nindent 8 }}
+        {{- end }}
+      {{- if .Values.tunnel.enabled }}
+      volumes:
+        - name: wireguard-secret
+          secret:
+            secretName: {{ .Values.tunnel.configSecret.name }}
+            defaultMode: 0400
+        - name: wireguard-run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        {{- if .Values.tunnel.userspace }}
+        - name: dev-net-tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+        {{- end }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

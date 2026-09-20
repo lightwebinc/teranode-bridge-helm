@@ -1,0 +1,49 @@
+# Pod-attached landing: the delivery tunnel terminates INSIDE the bridge pod, and
+# the bridge reaches an in-cluster Teranode over ordinary ClusterIP Services. No
+# landing server, no router, no BGP, no LoadBalancer, no inbound firewall rule.
+#
+#   kubectl create namespace bridge
+#   kubectl label namespace bridge pod-security.kubernetes.io/enforce=privileged
+#   kubectl -n bridge create secret generic bridge-shard0-wg \
+#     --from-file=wg0.conf=./wg0.conf        # the provisioned file, YOUR private key pasted in
+#   helm -n bridge install bridge-shard0 . -f examples/pod-attached.yaml \
+#     --set config.peerId=12D3KooW…
+#
+# One release per provisioned tunnel: a WireGuard key is one session, so the
+# chart refuses replicaCount > 1 here and rolls out with Recreate. k shards are
+# k releases, each with its own Secret, its own config.advertise and its own
+# Service. Exactly one of them holds the submitter role; the rest set
+# config.submitter: false.
+#
+# The sidecar is the only privileged container (root + NET_ADMIN, nothing else);
+# the bridge stays nonroot, drop ALL, read-only root filesystem. Policy forbids
+# NET_ADMIN? Terminate WireGuard on the node instead, or keep a landing box:
+# both leave tunnel.enabled false.
+networking:
+  mode: pod
+
+tunnel:
+  enabled: true
+  configSecret:
+    name: bridge-shard0-wg
+    key: wg0.conf
+
+config:
+  # Wildcard binds: the tunnel address appears when the sidecar handshakes, so
+  # start order never matters and a re-handshake needs no restart.
+  txListen: "[::]:8725"
+  subtreeListen: "[::]:9143"
+  blockListen: "[::]:9144"
+  retrievalListen: "[::]:9145"
+  # This release's OWN retrieval Service, so the cluster's pulls stay in-cluster.
+  advertise: "http://bridge-shard0-teranode-bridge-retrieval.bridge.svc.cluster.local:9145"
+  peerId: "" # REQUIRED, per instance: a synthetic 12D3KooW… id registered nowhere
+  propagation:
+    - "http://propagation.teranode.svc.cluster.local:8833"
+  kafka:
+    - "kafka.teranode.svc.cluster.local:9092"
+
+# The lanes never cross the CNI here, so only the cluster-facing and
+# Prometheus-facing rules mean anything.
+networkPolicy:
+  enabled: false

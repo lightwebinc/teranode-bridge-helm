@@ -51,6 +51,42 @@ jobs:
             --debug > /tmp/render-full.yaml
           test -s /tmp/render-full.yaml
 
+      - name: helm template (pod-attached tunnel, native and ordinary sidecar)
+        run: |
+          helm template release-test . \
+            --set tunnel.enabled=true \
+            --set tunnel.configSecret.name=bridge-wg \
+            --debug > /tmp/render-tunnel.yaml
+          grep -q 'restartPolicy: Always' /tmp/render-tunnel.yaml
+          grep -q 'type: Recreate' /tmp/render-tunnel.yaml
+          grep -q 'NET_ADMIN' /tmp/render-tunnel.yaml
+          helm template release-test . \
+            --set tunnel.enabled=true \
+            --set tunnel.configSecret.name=bridge-wg \
+            --set tunnel.nativeSidecar=false \
+            --kube-version 1.27.0 \
+            --debug > /tmp/render-tunnel-plain.yaml
+          ! grep -q 'initContainers' /tmp/render-tunnel-plain.yaml
+          grep -q 'name: wireguard' /tmp/render-tunnel-plain.yaml
+          # off by default: no sidecar, no volumes, no capability anywhere
+          ! grep -q 'wireguard\|NET_ADMIN' /tmp/render-default.yaml
+
+      - name: reject the tunnel under host networking, replicas, a missing Secret, an old cluster
+        run: |
+          base="--set tunnel.enabled=true --set tunnel.configSecret.name=bridge-wg"
+          if helm template release-test . $base --set networking.mode=host >/dev/null 2>&1; then
+            echo "expected the chart to reject tunnel.enabled with networking.mode=host"; exit 1
+          fi
+          if helm template release-test . $base --set replicaCount=2 >/dev/null 2>&1; then
+            echo "expected the chart to reject tunnel.enabled with replicaCount>1"; exit 1
+          fi
+          if helm template release-test . --set tunnel.enabled=true >/dev/null 2>&1; then
+            echo "expected the chart to reject tunnel.enabled without a configSecret"; exit 1
+          fi
+          if helm template release-test . $base --kube-version 1.28.0 >/dev/null 2>&1; then
+            echo "expected the chart to reject a native sidecar before Kubernetes 1.29"; exit 1
+          fi
+
       - name: reject a doubled -advertise path
         run: |
           if helm template release-test . \

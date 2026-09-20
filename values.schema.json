@@ -430,6 +430,119 @@
           }
         }
       }
+    },
+    "tunnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pullPolicy": {
+              "type": "string",
+              "enum": [
+                "Always",
+                "IfNotPresent",
+                "Never"
+              ]
+            }
+          },
+          "required": [
+            "repository",
+            "tag"
+          ]
+        },
+        "configSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "name",
+            "key"
+          ]
+        },
+        "interface": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_=+.-]{1,15}$"
+        },
+        "mtu": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9000
+        },
+        "userspace": {
+          "type": "boolean"
+        },
+        "nativeSidecar": {
+          "type": "boolean"
+        },
+        "shutdownDelaySeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "livenessProbe": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxHandshakeAgeSeconds": {
+              "type": "integer",
+              "minimum": 60
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "securityContext": {
+          "type": "object"
+        },
+        "resources": {
+          "type": "object"
+        },
+        "extraEnv": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "image",
+        "configSecret",
+        "interface"
+      ]
     }
   }
 }

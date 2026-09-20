@@ -8,6 +8,23 @@ Delivery lanes (inbound):
   subtree (BRC-143)    {{ $c.subtreeListen }}
   block   (BRC-144)    {{ $c.blockListen }}
 
+{{- if .Values.tunnel.enabled }}
+
+Pod-attached tunnel ENABLED: the `wireguard` sidecar dials out with the
+configuration in Secret {{ .Values.tunnel.configSecret.name }} (key {{ .Values.tunnel.configSecret.key }}) and the edge dials
+the lanes back through it, onto the listeners above. Check the session:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ $full }} -c wireguard -- wg show {{ .Values.tunnel.interface }}
+  A "latest handshake" under a few minutes old is a live tunnel. None at all
+  usually means the wrong key (the PUBLIC key pasted as PrivateKey looks the
+  same and never errors) or outbound UDP to the edge blocked.
+  The namespace must allow NET_ADMIN (pod-security.kubernetes.io/enforce:
+  privileged); `baseline` and `restricted` both reject this pod.
+{{- if .Values.networkPolicy.enabled }}
+  networkPolicy.laneIngressFrom is INERT here: the lanes arrive on the WireGuard
+  interface inside the pod, not through the CNI. Restrict them with AllowedIPs.
+{{- end }}
+{{- end }}
+
 {{- if $sink }}
 
 Sink mode: objects are received, parsed, verified and counted. No propagation

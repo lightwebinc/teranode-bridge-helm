@@ -91,6 +91,32 @@ Scale by adding **releases**, each with its own `config.advertise` — see [`exa
 
 For the same reason the chart ships **no HorizontalPodAutoscaler**. Autoscaling this workload would fragment the cache under load — the moment it is least able to absorb a miss — and, with the reverse path on, would be scaling the one thing that must stay singular.
 
+## Pod-attached tunnel
+
+`tunnel.enabled: true` terminates the consumer end of the delivery tunnel **inside the bridge pod**. A WireGuard sidecar shares the pod's network namespace with the bridge, dials **out** to the delivery edge, and holds the session with keepalives; the edge dials the three lanes back through it, onto the bridge's wildcard listeners. An in-cluster Teranode then needs no landing server, router, BGP session, LoadBalancer, NodePort or inbound firewall rule, and its retrieval pulls never leave the cluster. See [`examples/pod-attached.yaml`](examples/pod-attached.yaml).
+
+```bash
+kubectl create namespace bridge
+kubectl label namespace bridge pod-security.kubernetes.io/enforce=privileged
+kubectl -n bridge create secret generic bridge-shard0-wg --from-file=wg0.conf=./wg0.conf
+helm -n bridge install bridge-shard0 oci://ghcr.io/lightwebinc/charts/teranode-bridge \
+  -f examples/pod-attached.yaml --set config.peerId=12D3KooW…
+kubectl -n bridge exec deploy/bridge-shard0-teranode-bridge -c wireguard -- wg show wg0
+```
+
+**Maturity.** This shape is new in chart 0.8.0. It has been exercised against a stand-in WireGuard peer under exactly the security context the chart renders (handshake, lanes dialled back into an unprivileged container in the shared namespace, clean restart and shutdown), but not yet on a production cluster or through a pod reschedule against a live delivery slot. Drill a reschedule before you rely on it. The landing-tier shapes above are the proven ones.
+
+What to know before enabling it:
+
+- **The Secret is the provisioned file, unchanged, with your private key pasted in.** The chart never takes key material through values. The sidecar refuses the unedited placeholder key, and refuses a default route in `AllowedIPs` (in a pod that would send the bridge's own Kafka and propagation traffic into the tunnel). A `DNS =` line is dropped, because the pod keeps the cluster's resolver. `tunnel.mtu` (1420) is written only when the file sets none.
+- **One release per tunnel.** A WireGuard key is one session, so two pods holding it take the tunnel from each other on every keepalive. The chart refuses `replicaCount > 1`, and rolls out with `Recreate` so a surged pod never competes with the one still serving. `k` shards are `k` releases.
+- **The sidecar is the only privileged container.** It runs as root with `NET_ADMIN` and every other capability dropped, on a read-only root filesystem; the bridge stays nonroot with `drop: ["ALL"]`. Pod Security Standards `baseline` and `restricted` both forbid `NET_ADMIN` (`restricted` allows adding only `NET_BIND_SERVICE`; `baseline` allows a fixed list that excludes it), so the namespace needs `enforce: privileged`. If policy forbids that, terminate WireGuard on the node or keep a landing box, and leave `tunnel.enabled` false.
+- **The node needs the `wireguard` kernel module** (mainline since 5.6). `tunnel.userspace: true` mounts `/dev/net/tun` so `wg-quick` can fall back to `wireguard-go` where there is none; that needs an image that ships `wireguard-go`, which the default image does not.
+- **The pod's network namespace needs IPv6 enabled**, because the tunnel's inner addresses are IPv6. That is the kernel default, including on IPv4-only clusters; it fails only where nodes set `net.ipv6.conf.default.disable_ipv6=1`.
+- **Native sidecar by default** (`tunnel.nativeSidecar`, Kubernetes 1.29 or later): the tunnel starts before the bridge and stops after it, so a terminating bridge drains its lanes over a live tunnel. Set it false on older clusters; the sidecar then holds the tunnel up for `tunnel.shutdownDelaySeconds` after SIGTERM.
+- **Liveness restarts the sidecar, never the bridge**, when no peer has handshaken for `tunnel.livenessProbe.maxHandshakeAgeSeconds`. The restart also re-resolves the edge's hostname, which a running WireGuard interface never does.
+- **`networkPolicy.laneIngressFrom` is inert**: lane traffic arrives on the WireGuard interface inside the pod, not through the CNI. The retrieval and metrics rules still apply.
+
 ## Install-time refusals
 
 The chart fails rather than render a manifest that produces a crashloop or a silent data fault:
@@ -102,6 +128,10 @@ The chart fails rather than render a manifest that produces a crashloop or a sil
 | `config.peerId` not `12D3KooW` + 44 base58 chars | An undecodable id is diverted for the wrong reason and fills the cluster's logs with decode errors. |
 | `config.blockchain` set without `config.localAsset` **and** `config.edgeIngress` | The binary exits `2` before any listener opens — a crashloop, not a bridge. |
 | `replicaCount > 1` with reverse path + `config.submitter: true` | Duplicate upward publication of every locally produced object. |
+| `tunnel.enabled` with `networking.mode: host` | The sidecar would create the interface on the node itself, as root. Terminate a node-level tunnel on the node. |
+| `tunnel.enabled` with `replicaCount > 1` | One WireGuard key is one session: the pods steal the tunnel from each other and each sees a fraction of every lane. |
+| `tunnel.enabled` with an empty `tunnel.configSecret.name` | The configuration holds a private key and is only ever read from a Secret. |
+| `tunnel.nativeSidecar` on Kubernetes older than 1.29 | The sidecar would render as a blocking init container and the bridge would never start. |
 
 Softer problems (empty `advertise`/`propagation`/`kafka`, an empty `mineTag` with the reverse path on, `replicaCount > 1`) surface as NOTES warnings and a `helm.sh/chart-warnings` pod annotation.
 
@@ -153,6 +183,8 @@ Series are `teranode_bridge_*`, on the same `Namespace`/`Subsystem` grid as ever
 |---|---|
 | `pod` (default) | Ordinary CNI. Right when the Teranode cluster and the delivery side can both route to cluster Services. |
 | `host` | `hostNetwork: true` — the pod binds node addresses. Right when the cluster can only reach a node address, which is the common case for a landing tier in front of a LAN cluster. Lane ports become **host** ports: one bridge per node, and the rollout defaults to `Recreate` (a rolling update cannot bind the same host ports twice). |
+
+`tunnel.enabled` adds a third shape on top of `pod`: the delivery tunnel terminates in a sidecar inside the pod, so nothing outside the cluster has to reach it at all. See [Pod-attached tunnel](#pod-attached-tunnel).
 
 `networkPolicy` splits ingress by audience — `laneIngressFrom` (delivery side), `retrievalIngressFrom` (the cluster), `metricsIngressFrom` (Prometheus) — and is fail-closed: enabling it with an empty list for a port admits no peers on it. It is inert under `networking.mode: host`; restrict host traffic at the node firewall.
 

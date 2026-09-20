@@ -76,6 +76,23 @@ into a crashloop). Warnings, not failures, live in NOTES.txt.
 */}}
 {{- define "teranode-bridge.validate" -}}
 {{- $c := .Values.config -}}
+{{- if .Values.tunnel.enabled -}}
+{{- if ne .Values.networking.mode "pod" -}}
+{{- fail "teranode-bridge: tunnel.enabled needs networking.mode=pod. The sidecar creates the WireGuard interface in the POD's network namespace, which is what lets the bridge's listeners receive the lanes; under hostNetwork it would create it on the node itself, as root, from a chart. If the tunnel belongs on the node, terminate it there (wg-quick under systemd) and leave tunnel.enabled false." -}}
+{{- end -}}
+{{- if gt (int .Values.replicaCount) 1 -}}
+{{- fail (printf "teranode-bridge: replicaCount is %d with tunnel.enabled. A WireGuard key is ONE session: the edge sends to whichever pod handshook last, so %d pods sharing a key steal the tunnel from each other every keepalive and each sees a fraction of every lane. Run one release per provisioned tunnel." (int .Values.replicaCount) (int .Values.replicaCount)) -}}
+{{- end -}}
+{{- if not .Values.tunnel.configSecret.name -}}
+{{- fail "teranode-bridge: tunnel.enabled needs tunnel.configSecret.name. The wg-quick configuration holds your private key, so the chart only ever reads it from a Secret you create yourself: kubectl create secret generic <name> --from-file=wg0.conf=./wg0.conf" -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-zA-Z0-9_=+.-]{1,15}$" (.Values.tunnel.interface | default "")) -}}
+{{- fail (printf "teranode-bridge: tunnel.interface (%q) is not a valid interface name: 1 to 15 characters of letters, digits and _=+.-" (.Values.tunnel.interface | default "")) -}}
+{{- end -}}
+{{- if and .Values.tunnel.nativeSidecar (semverCompare "<1.29.0-0" .Capabilities.KubeVersion.Version) -}}
+{{- fail (printf "teranode-bridge: tunnel.nativeSidecar needs Kubernetes 1.29 or later (this cluster reports %s). Set tunnel.nativeSidecar=false to run the tunnel as an ordinary container." .Capabilities.KubeVersion.Version) -}}
+{{- end -}}
+{{- end -}}
 {{- $sink := eq ($c.mode | default "all") "sink" -}}
 {{- $adv := trimSuffix "/" ($c.advertise | default "") -}}
 {{- $prefix := include "teranode-bridge.apiPrefix" . -}}
@@ -265,4 +282,127 @@ describe pod` readable and keeps `--set` free of comma escaping.
 {{- range .Values.extraArgs }}
 - {{ . | quote }}
 {{- end -}}
+{{- end -}}
+
+
+{{/*
+tunnelScript — what the WireGuard sidecar runs. The provisioned wg-quick file
+is copied out of the Secret into a tmpfs (mode 0600, named after the
+interface, which is what wg-quick requires) with two edits: a DNS= line is
+dropped, because the pod keeps the cluster's resolver and wg-quick would
+otherwise want resolvconf and a writable /etc; and an MTU is written when the
+file carries none.
+
+It refuses two configurations outright, because both fail silently later:
+  * the unedited "PrivateKey = <paste ...>" placeholder
+  * a default route in AllowedIPs, which would pull the bridge's own traffic
+    to Kafka, propagation and the asset service into the tunnel
+
+The pod's network namespace outlives a container restart, so an interface left
+behind by a killed sidecar is removed before bringing the tunnel up.
+*/}}
+{{- define "teranode-bridge.tunnelScript" -}}
+{{- $t := .Values.tunnel -}}
+set -euo pipefail
+IFACE={{ $t.interface | quote }}
+SRC="/etc/wireguard-secret/{{ $t.configSecret.key }}"
+CONF="/run/wireguard/${IFACE}.conf"
+say() { echo "tunnel: $*" >&2; }
+
+[ -s "$SRC" ] || { say "$SRC is missing or empty: check tunnel.configSecret.name and .key"; exit 1; }
+if grep -Eiq '^[[:space:]]*PrivateKey[[:space:]]*=[[:space:]]*(<|$)' "$SRC"; then
+  say "PrivateKey is still the placeholder. Paste the PRIVATE key you generated (never the public one) and recreate the Secret."
+  exit 1
+fi
+if grep -Ei '^[[:space:]]*AllowedIPs[[:space:]]*=' "$SRC" | grep -Eq '(=|,)[[:space:]]*(0\.0\.0\.0|::)/0[[:space:]]*(,|$)'; then
+  say "AllowedIPs contains a default route. In a pod that sends the bridge's own traffic (Kafka, propagation, asset) into the tunnel. Use the prefixes from your provisioned configuration."
+  exit 1
+fi
+
+umask 077
+grep -Eiv '^[[:space:]]*DNS[[:space:]]*=' "$SRC" > "$CONF.tmp"
+{{- if gt (int $t.mtu) 0 }}
+if ! grep -Eiq '^[[:space:]]*MTU[[:space:]]*=' "$CONF.tmp"; then
+  awk -v mtu={{ int $t.mtu }} '{ print } /^\[Interface\]/ && !done { print "MTU = " mtu; done = 1 }' "$CONF.tmp" > "$CONF.tmp2"
+  mv "$CONF.tmp2" "$CONF.tmp"
+fi
+{{- end }}
+mv "$CONF.tmp" "$CONF"
+
+down() {
+{{- if not $t.nativeSidecar }}
+  say "SIGTERM: holding the tunnel up {{ int $t.shutdownDelaySeconds }}s so the bridge can drain its lanes"
+  sleep {{ int $t.shutdownDelaySeconds }} || true
+{{- end }}
+  wg-quick down "$CONF" || true
+  exit 0
+}
+trap down TERM INT
+
+ip link del dev "$IFACE" 2>/dev/null || true
+wg-quick up "$CONF"
+say "up: $(wg show "$IFACE" public-key), $(wg show "$IFACE" peers | wc -l) peer(s), listening for handshakes"
+while :; do sleep 3600 & wait $!; done
+{{- end -}}
+
+{{/*
+tunnelContainer — the sidecar itself. Rendered under initContainers with
+restartPolicy: Always (a native sidecar) or under containers, by the caller.
+*/}}
+{{- define "teranode-bridge.tunnelContainer" -}}
+{{- $t := .Values.tunnel -}}
+- name: wireguard
+  image: "{{ $t.image.repository }}:{{ $t.image.tag }}"
+  imagePullPolicy: {{ $t.image.pullPolicy }}
+  {{- if $t.nativeSidecar }}
+  restartPolicy: Always
+  {{- end }}
+  {{- with $t.securityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  command: ["/bin/bash", "-c"]
+  args:
+    - |
+      {{- include "teranode-bridge.tunnelScript" . | nindent 6 }}
+  {{- if or $t.userspace $t.extraEnv }}
+  env:
+    {{- if $t.userspace }}
+    - name: WG_QUICK_USERSPACE_IMPLEMENTATION
+      value: wireguard-go
+    - name: WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD
+      value: "1"
+    {{- end }}
+    {{- with $t.extraEnv }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+  {{- if $t.livenessProbe.enabled }}
+  livenessProbe:
+    exec:
+      command:
+        - /bin/sh
+        - -c
+        - >-
+          last=$(wg show {{ $t.interface }} latest-handshakes | awk '$2 > m { m = $2 } END { print m + 0 }');
+          [ "$last" -gt 0 ] && [ $(( $(date +%s) - last )) -lt {{ int $t.livenessProbe.maxHandshakeAgeSeconds }} ]
+    initialDelaySeconds: {{ $t.livenessProbe.initialDelaySeconds }}
+    periodSeconds: {{ $t.livenessProbe.periodSeconds }}
+    timeoutSeconds: {{ $t.livenessProbe.timeoutSeconds }}
+    failureThreshold: {{ $t.livenessProbe.failureThreshold }}
+  {{- end }}
+  {{- with $t.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  volumeMounts:
+    - name: wireguard-secret
+      mountPath: /etc/wireguard-secret
+      readOnly: true
+    - name: wireguard-run
+      mountPath: /run/wireguard
+    {{- if $t.userspace }}
+    - name: dev-net-tun
+      mountPath: /dev/net/tun
+    {{- end }}
 {{- end -}}
